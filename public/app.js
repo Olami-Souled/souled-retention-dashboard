@@ -202,9 +202,11 @@ function renderHeatmap(containerId, data) {
   }
   html += '</tr></thead><tbody>';
 
-  // Track sums for average row
+  // Track sums for average row + raw retained/total for chart tooltips
   const periodSums = new Array(maxPeriods).fill(0);
   const periodCounts = new Array(maxPeriods).fill(0);
+  const periodRetained = new Array(maxPeriods).fill(0);
+  const periodTotal = new Array(maxPeriods).fill(0);
 
   for (const cohort of data.cohorts) {
     const monthLabel = formatMonth(cohort.month);
@@ -221,6 +223,8 @@ function renderHeatmap(containerId, data) {
           + `${period.pct}%</td>`;
         periodSums[p] += period.pct;
         periodCounts[p]++;
+        periodRetained[p] += period.retained;
+        periodTotal[p] += cohort.total;
       } else {
         html += '<td class="na-cell"></td>';
       }
@@ -251,11 +255,16 @@ function renderHeatmap(containerId, data) {
   // Attach tooltip listeners
   attachTooltips(container);
 
-  // Return averages for chart
+  // Return averages for chart (with raw totals for tooltips)
   const averages = [];
   for (let p = 0; p < maxPeriods; p++) {
     if (periodCounts[p] > 0) {
-      averages.push(Math.round((periodSums[p] / periodCounts[p]) * 10) / 10);
+      averages.push({
+        pct: Math.round((periodSums[p] / periodCounts[p]) * 10) / 10,
+        cohorts: periodCounts[p],
+        retained: periodRetained[p],
+        total: periodTotal[p]
+      });
     }
   }
   return averages;
@@ -276,10 +285,14 @@ function renderRetentionChart() {
   const maxLen = Math.max(lastAvgA.length, (lastAvgB || []).length);
   const labels = Array.from({ length: maxLen }, (_, i) => `M${i + 1}`);
 
+  const countA = document.getElementById('countA').textContent;
+  const countB = document.getElementById('countB').textContent;
   const labelA = document.getElementById('labelA').textContent;
   const datasets = [{
     label: lastAvgB ? labelA : 'Average Retention',
-    data: lastAvgA,
+    data: lastAvgA.map(d => d.pct),
+    _meta: lastAvgA,
+    _totalStudents: countA,
     borderColor: '#1a5276',
     backgroundColor: 'rgba(26, 82, 118, 0.1)',
     borderWidth: 2,
@@ -292,7 +305,9 @@ function renderRetentionChart() {
     const labelB = document.getElementById('labelB').textContent;
     datasets.push({
       label: labelB,
-      data: lastAvgB,
+      data: lastAvgB.map(d => d.pct),
+      _meta: lastAvgB,
+      _totalStudents: countB,
       borderColor: '#e17055',
       backgroundColor: 'rgba(225, 112, 85, 0.1)',
       borderWidth: 2,
@@ -326,7 +341,13 @@ function renderRetentionChart() {
       plugins: {
         tooltip: {
           callbacks: {
-            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%`
+            label: ctx => {
+              const meta = ctx.dataset._meta?.[ctx.dataIndex];
+              if (meta) {
+                return `${ctx.dataset.label}: ${ctx.parsed.y}% — ${meta.retained}/${meta.total} retained (${meta.cohorts} cohorts)`;
+              }
+              return `${ctx.dataset.label}: ${ctx.parsed.y}%`;
+            }
           }
         }
       }

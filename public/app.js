@@ -232,16 +232,16 @@ function renderHeatmap(containerId, data) {
     html += '</tr>';
   }
 
-  // Summary average row
+  // Summary row (weighted average: total retained / total students)
   const totalStudents = data.cohorts.reduce((sum, c) => sum + c.total, 0);
-  html += `<tr class="summary-row"><th>Average</th><td class="count-cell">${totalStudents}</td>`;
+  html += `<tr class="summary-row"><th>Weighted Avg</th><td class="count-cell">${totalStudents}</td>`;
   for (let p = 0; p < maxPeriods; p++) {
-    if (periodCounts[p] > 0) {
-      const avg = Math.round((periodSums[p] / periodCounts[p]) * 10) / 10;
+    if (periodTotal[p] > 0) {
+      const avg = Math.round((periodRetained[p] / periodTotal[p]) * 1000) / 10;
       const color = retentionColor(avg);
       const textColor = avg > 50 ? '#fff' : '#2d3436';
       html += `<td class="retention-cell" style="background:${color};color:${textColor}" `
-        + `data-tooltip="Average of ${periodCounts[p]} cohorts (${avg}%)">`
+        + `data-tooltip="${periodRetained[p]}/${periodTotal[p]} retained (${avg}%)">`
         + `${avg}%</td>`;
     } else {
       html += '<td class="na-cell"></td>';
@@ -255,12 +255,12 @@ function renderHeatmap(containerId, data) {
   // Attach tooltip listeners
   attachTooltips(container);
 
-  // Return averages for chart (with raw totals for tooltips)
+  // Return weighted averages for chart (with raw totals for tooltips)
   const averages = [];
   for (let p = 0; p < maxPeriods; p++) {
-    if (periodCounts[p] > 0) {
+    if (periodTotal[p] > 0) {
       averages.push({
-        pct: Math.round((periodSums[p] / periodCounts[p]) * 10) / 10,
+        pct: Math.round((periodRetained[p] / periodTotal[p]) * 1000) / 10,
         cohorts: periodCounts[p],
         retained: periodRetained[p],
         total: periodTotal[p]

@@ -1,0 +1,296 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f5f6fa;
+  color: #2d3436;
+  padding: 20px;
+}
+
+header {
+  margin-bottom: 20px;
+}
+
+header h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #2d3436;
+}
+
+/* --- Controls --- */
+.controls {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filter-group label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #636e72;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.filter-group select,
+.filter-group input[type="month"],
+.filter-group input[type="number"] {
+  padding: 6px 10px;
+  border: 1px solid #dfe6e9;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  background: #fff;
+  min-width: 140px;
+}
+
+.filter-group select:focus,
+.filter-group input:focus {
+  outline: none;
+  border-color: #0984e3;
+}
+
+.filter-with-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.is-not-toggle {
+  padding: 6px 8px;
+  border: 1px solid #dfe6e9;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: #fff;
+  color: #0984e3;
+  white-space: nowrap;
+  min-width: 38px;
+  text-align: center;
+}
+
+.is-not-toggle[data-mode="not"] {
+  background: #d63031;
+  color: #fff;
+  border-color: #d63031;
+}
+
+.btn-primary {
+  padding: 8px 20px;
+  background: #0984e3;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-end;
+}
+
+.btn-primary:hover { background: #0770c2; }
+.btn-primary:disabled { background: #b2bec3; cursor: not-allowed; }
+
+.compare-toggle {
+  margin-top: 12px;
+  font-size: 0.85rem;
+}
+
+.compare-toggle input { margin-right: 4px; }
+
+.compare-label {
+  font-weight: 600;
+  color: #e17055;
+  font-size: 0.85rem;
+  margin-right: 8px;
+  align-self: center;
+}
+
+#compareFilters {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #dfe6e9;
+}
+
+/* --- Loading --- */
+.loading {
+  text-align: center;
+  padding: 40px;
+  font-size: 1rem;
+  color: #636e72;
+}
+
+/* --- Dashboard --- */
+#dashboardContainer {
+  display: flex;
+  gap: 20px;
+}
+
+.table-panel {
+  flex: 1;
+  min-width: 0;
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.panel-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-header h2 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.student-count {
+  font-size: 0.8rem;
+  color: #636e72;
+}
+
+/* --- Chart --- */
+.chart-panel {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.chart-panel h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.chart-panel canvas {
+  max-height: 350px;
+}
+
+/* --- Heatmap Table --- */
+.heatmap-wrapper {
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.heatmap-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.75rem;
+  min-width: 600px;
+}
+
+.heatmap-table th,
+.heatmap-table td {
+  padding: 6px 8px;
+  text-align: center;
+  border: 1px solid #f0f0f0;
+  white-space: nowrap;
+}
+
+/* Sticky header row */
+.heatmap-table thead th {
+  background: #f8f9fa;
+  font-weight: 600;
+  color: #636e72;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+/* Sticky header + first column (cohort) corner */
+.heatmap-table thead th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+}
+
+/* Sticky header + second column (students) corner */
+.heatmap-table thead th:nth-child(2) {
+  position: sticky;
+  left: 80px;
+  z-index: 4;
+}
+
+/* Sticky first column (cohort month) */
+.heatmap-table tbody th {
+  background: #f8f9fa;
+  font-weight: 600;
+  text-align: left;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+
+/* Sticky second column (student count) */
+.heatmap-table td.count-cell {
+  background: #f8f9fa;
+  font-weight: 600;
+  color: #2d3436;
+  position: sticky;
+  left: 80px;
+  z-index: 2;
+}
+
+/* Summary row sticky cells */
+.heatmap-table tr.summary-row th {
+  background: #f8f9fa;
+  z-index: 4;
+}
+
+.heatmap-table tr.summary-row td.count-cell {
+  z-index: 4;
+}
+
+.heatmap-table td.retention-cell {
+  font-weight: 500;
+  cursor: default;
+  min-width: 52px;
+}
+
+.heatmap-table tr.summary-row th,
+.heatmap-table tr.summary-row td {
+  border-top: 2px solid #636e72;
+  font-weight: 700;
+}
+
+.heatmap-table td.retention-cell:hover {
+  outline: 2px solid #2d3436;
+  outline-offset: -2px;
+}
+
+.heatmap-table td.na-cell {
+  background: #f8f9fa;
+  color: #b2bec3;
+}
+
+/* --- Tooltip --- */
+.cell-tooltip {
+  position: fixed;
+  background: #2d3436;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  pointer-events: none;
+  z-index: 100;
+  white-space: nowrap;
+}

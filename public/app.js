@@ -25,9 +25,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('breakdownSearch').addEventListener('input', onBreakdownSearch);
   document.getElementById('breakdownBtn').addEventListener('click', fetchAndRenderBreakdown);
 
-  // Load data
+  // Load filter options only (no data fetch until user clicks Apply)
   await loadFilters();
-  await fetchAndRender();
 });
 
 // --- Load filter options ---

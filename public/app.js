@@ -7,9 +7,7 @@ let lastAvgB = null;
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadFilters();
-  await fetchAndRender();
-
+  // Attach all event listeners first, before any async work
   document.getElementById('applyBtn').addEventListener('click', fetchAndRender);
   document.getElementById('compareMode').addEventListener('change', onCompareModeToggle);
 
@@ -26,6 +24,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('breakdownBy').addEventListener('change', onBreakdownChange);
   document.getElementById('breakdownSearch').addEventListener('input', onBreakdownSearch);
   document.getElementById('breakdownBtn').addEventListener('click', fetchAndRenderBreakdown);
+
+  // Load data
+  await loadFilters();
+  await fetchAndRender();
 });
 
 // --- Load filter options ---

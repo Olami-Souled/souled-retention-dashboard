@@ -107,6 +107,9 @@ app.get('/api/filters', async (req, res) => {
       ? `${earliestDate.getFullYear()}-${String(earliestDate.getMonth() + 1).padStart(2, '0')}`
       : null;
 
+    // Cache for name lookups in breakdown endpoint
+    filtersCache = { coaches, orgs: referringOrgs };
+
     res.json({
       coaches,
       referralTypes: Array.from(referralTypes).sort(),
@@ -323,6 +326,179 @@ app.get('/api/cohort-data', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// --- /api/breakdown-data ---
+app.get('/api/breakdown-data', async (req, res) => {
+  try {
+    const conn = await getSfConnection();
+    const testIds = await getTestContactIds(conn);
+    const { startDate, endDate, minMeetings, graduatedMode, breakdownBy, selectedIds } = req.query;
+
+    if (!breakdownBy || !selectedIds) {
+      return res.json({ series: [] });
+    }
+
+    const ids = selectedIds.split(',');
+
+    // Query all data (no coach/referral filters — we split by breakdown dimension)
+    const relationships = await queryAll(conn,
+      `SELECT Student__c, Mentor__c, Mentor__r.Name, Start_Date__c, End_Date__c
+       FROM Relationship__c
+       WHERE Type__c = 'Souled Coach' AND Start_Date__c != null`
+    );
+    const registrations = await queryAll(conn,
+      `SELECT Student__c, Referral_Type__c, Referral_Category__c,
+              Referring_Organization__c, Referring_Organization__r.Name,
+              Referring_Friend__c, Status__c, Stopped_Meeting_with_Coach_Reason__c
+       FROM Registration__c
+       WHERE RecordType.Name = 'Program'`
+    );
+
+    let contacts = null;
+    if (minMeetings) {
+      const contactRecords = await queryAll(conn,
+        `SELECT Id, Touch_Points__c FROM Contact WHERE Touch_Points__c >= ${parseInt(minMeetings, 10)}`
+      );
+      contacts = new Set(contactRecords.map(c => c.Id));
+    }
+
+    // Build registration lookup + graduated set
+    const regByStudent = new Map();
+    const graduatedStudents = new Set();
+    for (const r of registrations) {
+      if (!regByStudent.has(r.Student__c)) regByStudent.set(r.Student__c, r);
+      if (r.Status__c === 'Graduated'
+          || (r.Stopped_Meeting_with_Coach_Reason__c
+              && r.Stopped_Meeting_with_Coach_Reason__c.includes('Graduated'))) {
+        graduatedStudents.add(r.Student__c);
+      }
+    }
+
+    const gradMode = graduatedMode || 'active';
+
+    // Group relationships by student
+    const studentMap = new Map();
+    // Also track per-student: which coaches and which referring org
+    for (const r of relationships) {
+      const sid = r.Student__c;
+      if (testIds.has(sid) || testIds.has(r.Mentor__c)) continue;
+      const start = r.Start_Date__c ? new Date(r.Start_Date__c) : null;
+      const end = r.End_Date__c ? new Date(r.End_Date__c) : null;
+      if (!start) continue;
+
+      if (!studentMap.has(sid)) {
+        studentMap.set(sid, { earliestStart: start, latestEnd: end, coaches: new Set() });
+      } else {
+        const s = studentMap.get(sid);
+        if (start < s.earliestStart) s.earliestStart = start;
+        if (s.latestEnd !== null) {
+          if (end === null) s.latestEnd = null;
+          else if (end > s.latestEnd) s.latestEnd = end;
+        }
+      }
+      if (r.Mentor__c) studentMap.get(sid).coaches.add(r.Mentor__c);
+    }
+
+    // Build filtered student list
+    const students = [];
+    for (const [studentId, data] of studentMap) {
+      const isGraduated = graduatedStudents.has(studentId);
+      if (isGraduated && gradMode === 'exclude') continue;
+      if (minMeetings && contacts && !contacts.has(studentId)) continue;
+
+      const cohortStart = data.earliestStart;
+      if (startDate && cohortStart < new Date(startDate)) continue;
+      if (endDate && cohortStart > new Date(endDate)) continue;
+
+      const latestEnd = (isGraduated && gradMode === 'active') ? null : data.latestEnd;
+      const reg = regByStudent.get(studentId);
+
+      students.push({ studentId, cohortStart, latestEnd, coaches: data.coaches, reg });
+    }
+
+    // For each selected ID, compute average retention curve
+    const today = new Date();
+    const series = [];
+
+    for (const id of ids) {
+      // Filter students belonging to this breakdown value
+      const subset = students.filter(s => {
+        if (breakdownBy === 'coach') return s.coaches.has(id);
+        if (breakdownBy === 'org') return s.reg && s.reg.Referring_Organization__c === id;
+        return false;
+      });
+
+      if (subset.length === 0) continue;
+
+      // Group into monthly cohorts
+      const cohortMap = new Map();
+      for (const s of subset) {
+        const key = `${s.cohortStart.getFullYear()}-${String(s.cohortStart.getMonth() + 1).padStart(2, '0')}`;
+        if (!cohortMap.has(key)) cohortMap.set(key, []);
+        cohortMap.get(key).push(s);
+      }
+
+      const sortedMonths = Array.from(cohortMap.keys()).sort();
+      let maxPeriods = 0;
+      if (sortedMonths.length > 0) {
+        const earliest = new Date(sortedMonths[0] + '-01');
+        maxPeriods = Math.ceil((today - earliest) / (30 * 24 * 60 * 60 * 1000));
+        maxPeriods = Math.min(maxPeriods, 48);
+      }
+
+      // Compute average retention per period
+      const periodSums = new Array(maxPeriods).fill(0);
+      const periodCounts = new Array(maxPeriods).fill(0);
+
+      for (const month of sortedMonths) {
+        const studentsInCohort = cohortMap.get(month);
+        const total = studentsInCohort.length;
+        const cohortStartDate = new Date(month + '-01');
+
+        for (let p = 0; p < maxPeriods; p++) {
+          const periodEnd = new Date(cohortStartDate);
+          periodEnd.setDate(periodEnd.getDate() + (p + 1) * 30);
+          if (periodEnd > today) break;
+
+          let retained = 0;
+          for (const s of studentsInCohort) {
+            if (s.latestEnd === null || s.latestEnd > periodEnd) retained++;
+          }
+          const pct = total > 0 ? Math.round((retained / total) * 1000) / 10 : 0;
+          periodSums[p] += pct;
+          periodCounts[p]++;
+        }
+      }
+
+      const averages = [];
+      for (let p = 0; p < maxPeriods; p++) {
+        if (periodCounts[p] > 0) {
+          averages.push(Math.round((periodSums[p] / periodCounts[p]) * 10) / 10);
+        }
+      }
+
+      // Look up name
+      let name = id;
+      if (breakdownBy === 'coach') {
+        const coach = filtersCache?.coaches?.find(c => c.id === id);
+        if (coach) name = coach.name;
+      } else if (breakdownBy === 'org') {
+        const org = filtersCache?.orgs?.find(o => o.id === id);
+        if (org) name = org.name;
+      }
+
+      series.push({ id, name, studentCount: subset.length, averages });
+    }
+
+    res.json({ series });
+  } catch (err) {
+    console.error('Error fetching breakdown data:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Simple cache for name lookups in breakdown endpoint
+let filtersCache = null;
 
 app.listen(PORT, () => {
   console.log(`Retention dashboard running at http://localhost:${PORT}`);

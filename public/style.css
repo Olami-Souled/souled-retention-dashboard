@@ -166,6 +166,59 @@ header h1 {
   color: #636e72;
 }
 
+/* --- Breakdown --- */
+.breakdown-controls {
+  margin-bottom: 20px;
+}
+
+.breakdown-select-group {
+  min-width: 300px;
+}
+
+.breakdown-picker {
+  border: 1px solid #dfe6e9;
+  border-radius: 4px;
+  background: #fff;
+  max-height: 250px;
+  display: flex;
+  flex-direction: column;
+}
+
+.breakdown-search {
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 1px solid #dfe6e9;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.breakdown-options {
+  overflow-y: auto;
+  max-height: 200px;
+  padding: 4px 0;
+}
+
+.breakdown-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-transform: none;
+  font-weight: 400;
+  color: #2d3436;
+  letter-spacing: 0;
+}
+
+.breakdown-options label:hover {
+  background: #f0f4f8;
+}
+
+.breakdown-options input[type="checkbox"] {
+  margin: 0;
+}
+
 /* --- Chart --- */
 .chart-panel {
   background: #fff;

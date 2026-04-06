@@ -128,6 +128,32 @@
     </div>
   </div>
 
+  <div class="controls breakdown-controls">
+    <div class="filter-row">
+      <div class="filter-group">
+        <label for="breakdownBy">Breakdown by</label>
+        <select id="breakdownBy">
+          <option value="">None</option>
+          <option value="coach">Coach</option>
+          <option value="org">Referring Organization</option>
+        </select>
+      </div>
+      <div class="filter-group breakdown-select-group" id="breakdownSelectGroup" style="display:none;">
+        <label>Select items to compare</label>
+        <div class="breakdown-picker">
+          <input type="text" id="breakdownSearch" placeholder="Search..." class="breakdown-search">
+          <div id="breakdownOptions" class="breakdown-options"></div>
+        </div>
+      </div>
+      <button id="breakdownBtn" class="btn-primary" style="display:none;">Show Breakdown</button>
+    </div>
+  </div>
+
+  <div id="breakdownChartPanel" class="chart-panel" style="display:none;">
+    <h2>Retention Breakdown</h2>
+    <canvas id="breakdownChart"></canvas>
+  </div>
+
   <div id="loading" class="loading" style="display:none;">Loading data from Salesforce...</div>
 
   <div id="chartPanel" class="chart-panel" style="display:none;">

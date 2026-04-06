@@ -1,6 +1,7 @@
 // --- State ---
 let filtersData = null;
 let retentionChart = null;
+let breakdownChart = null;
 let lastAvgA = null;
 let lastAvgB = null;
 
@@ -20,6 +21,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       btn.textContent = mode === 'is' ? 'is' : 'is not';
     });
   });
+
+  // Breakdown controls
+  document.getElementById('breakdownBy').addEventListener('change', onBreakdownChange);
+  document.getElementById('breakdownSearch').addEventListener('input', onBreakdownSearch);
+  document.getElementById('breakdownBtn').addEventListener('click', fetchAndRenderBreakdown);
 });
 
 // --- Load filter options ---
@@ -343,6 +349,159 @@ function retentionColor(pct) {
   const g = Math.round(light.g + (dark.g - light.g) * t);
   const b = Math.round(light.b + (dark.b - light.b) * t);
   return `rgb(${r},${g},${b})`;
+}
+
+// --- Breakdown ---
+const BREAKDOWN_COLORS = [
+  '#1a5276', '#e17055', '#00b894', '#6c5ce7', '#fdcb6e',
+  '#e84393', '#0984e3', '#d63031', '#00cec9', '#636e72',
+  '#2d3436', '#a29bfe', '#fab1a0', '#55efc4', '#fd79a8'
+];
+
+function onBreakdownChange() {
+  const val = document.getElementById('breakdownBy').value;
+  const group = document.getElementById('breakdownSelectGroup');
+  const btn = document.getElementById('breakdownBtn');
+  const chartPanel = document.getElementById('breakdownChartPanel');
+
+  if (!val) {
+    group.style.display = 'none';
+    btn.style.display = 'none';
+    chartPanel.style.display = 'none';
+    return;
+  }
+
+  group.style.display = 'block';
+  btn.style.display = 'inline-block';
+
+  // Populate checkboxes
+  const options = document.getElementById('breakdownOptions');
+  const search = document.getElementById('breakdownSearch');
+  search.value = '';
+
+  let items = [];
+  if (val === 'coach') {
+    items = filtersData.coaches.map(c => ({ id: c.id, label: c.name }));
+  } else if (val === 'org') {
+    items = filtersData.referringOrgs.map(o => ({ id: o.id, label: o.name }));
+  }
+
+  options.innerHTML = items.map(item =>
+    `<label data-search="${item.label.toLowerCase()}">
+      <input type="checkbox" value="${item.id}"> ${item.label}
+    </label>`
+  ).join('');
+}
+
+function onBreakdownSearch() {
+  const query = document.getElementById('breakdownSearch').value.toLowerCase();
+  const labels = document.querySelectorAll('#breakdownOptions label');
+  labels.forEach(label => {
+    label.style.display = label.dataset.search.includes(query) ? 'flex' : 'none';
+  });
+}
+
+async function fetchAndRenderBreakdown() {
+  const breakdownBy = document.getElementById('breakdownBy').value;
+  if (!breakdownBy) return;
+
+  const checked = document.querySelectorAll('#breakdownOptions input:checked');
+  if (checked.length === 0) return;
+
+  const selectedIds = Array.from(checked).map(cb => cb.value).join(',');
+
+  // Build base params (date range, minMeetings, graduatedMode)
+  const params = new URLSearchParams();
+  const startDate = document.getElementById('startDate').value;
+  const endDate = document.getElementById('endDate').value;
+  const minMeetings = document.getElementById('minMeetings').value;
+  const graduatedMode = document.getElementById('graduatedMode').value;
+
+  if (startDate) params.set('startDate', startDate + '-01');
+  if (endDate) {
+    const [y, m] = endDate.split('-').map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    params.set('endDate', `${endDate}-${lastDay}`);
+  }
+  if (minMeetings) params.set('minMeetings', minMeetings);
+  if (graduatedMode) params.set('graduatedMode', graduatedMode);
+  params.set('breakdownBy', breakdownBy);
+  params.set('selectedIds', selectedIds);
+
+  const loading = document.getElementById('loading');
+  const btn = document.getElementById('breakdownBtn');
+  loading.style.display = 'block';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/breakdown-data?' + params.toString());
+    const data = await res.json();
+    renderBreakdownChart(data.series);
+  } catch (err) {
+    console.error('Error fetching breakdown data:', err);
+  } finally {
+    loading.style.display = 'none';
+    btn.disabled = false;
+  }
+}
+
+function renderBreakdownChart(series) {
+  const panel = document.getElementById('breakdownChartPanel');
+  const canvas = document.getElementById('breakdownChart');
+
+  if (!series || series.length === 0) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+
+  const maxLen = Math.max(...series.map(s => s.averages.length));
+  const labels = Array.from({ length: maxLen }, (_, i) => `M${i + 1}`);
+
+  const datasets = series.map((s, i) => ({
+    label: `${s.name} (${s.studentCount})`,
+    data: s.averages,
+    borderColor: BREAKDOWN_COLORS[i % BREAKDOWN_COLORS.length],
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    pointRadius: 3,
+    tension: 0.3,
+    fill: false
+  }));
+
+  if (breakdownChart) breakdownChart.destroy();
+
+  breakdownChart = new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          min: 0,
+          max: 100,
+          ticks: { callback: v => v + '%' },
+          title: { display: true, text: 'Retention %' }
+        },
+        x: {
+          title: { display: true, text: 'Months Since Start' }
+        }
+      },
+      plugins: {
+        tooltip: {
+          callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y}%`
+          }
+        },
+        legend: {
+          position: 'bottom',
+          labels: { boxWidth: 12, padding: 15 }
+        }
+      }
+    }
+  });
 }
 
 // --- Tooltips ---

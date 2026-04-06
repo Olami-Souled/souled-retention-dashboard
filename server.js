@@ -425,6 +425,8 @@ app.get('/api/breakdown-data', async (req, res) => {
       const subset = students.filter(s => {
         if (breakdownBy === 'coach') return s.coaches.has(id);
         if (breakdownBy === 'org') return s.reg && s.reg.Referring_Organization__c === id;
+        if (breakdownBy === 'referralType') return s.reg && s.reg.Referral_Type__c === id;
+        if (breakdownBy === 'referralCategory') return s.reg && s.reg.Referral_Category__c === id;
         return false;
       });
 
@@ -486,6 +488,7 @@ app.get('/api/breakdown-data', async (req, res) => {
         const org = filtersCache?.orgs?.find(o => o.id === id);
         if (org) name = org.name;
       }
+      // referralType and referralCategory use the value as the name already
 
       series.push({ id, name, studentCount: subset.length, averages });
     }

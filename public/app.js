@@ -385,6 +385,10 @@ function onBreakdownChange() {
     items = filtersData.coaches.map(c => ({ id: c.id, label: c.name }));
   } else if (val === 'org') {
     items = filtersData.referringOrgs.map(o => ({ id: o.id, label: o.name }));
+  } else if (val === 'referralType') {
+    items = filtersData.referralTypes.map(v => ({ id: v, label: v }));
+  } else if (val === 'referralCategory') {
+    items = filtersData.referralCategories.map(v => ({ id: v, label: v }));
   }
 
   options.innerHTML = items.map(item =>

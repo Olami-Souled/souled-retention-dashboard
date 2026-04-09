@@ -503,6 +503,414 @@ app.get('/api/breakdown-data', async (req, res) => {
 // Simple cache for name lookups in breakdown endpoint
 let filtersCache = null;
 
+// --- Executive Report helpers ---
+
+// FY date boundaries (Sep 1 - Aug 31)
+function getFYDates(fy) {
+  // fy = "FY26" means Sep 1 2025 - Aug 31 2026
+  const year = parseInt(fy.replace('FY', ''), 10) + 2000;
+  return {
+    start: `${year - 1}-09-01`,
+    end: `${year}-08-31`
+  };
+}
+
+// Map FY to the Contact rollup field names
+// NOTE: Touch_Points_FY25__c is labeled "FY26" (repurposed)
+function getTouchPointField(fy) {
+  const map = { FY23: 'Touch_Points_FY23x__c', FY24: 'Touch_Points_FY24__c', FY26: 'Touch_Points_FY25__c' };
+  return map[fy] || null; // FY25 has no rollup field
+}
+function getInteractionField(fy) {
+  const map = { FY23: 'Interactions_FY23__c', FY24: 'Interactions_FY24__c', FY25: 'Interactions_FY25__c' };
+  return map[fy] || null; // FY26 has no rollup field
+}
+
+// --- /api/executive-data ---
+app.get('/api/executive-data', async (req, res) => {
+  try {
+    const conn = await getSfConnection();
+    const testIds = await getTestContactIds(conn);
+    const fy = req.query.fy || 'FY26';
+    const fyDates = getFYDates(fy);
+
+    const tpField = getTouchPointField(fy);
+    const intField = getInteractionField(fy);
+
+    // --- Section 1-3: Coaching & Buckets ---
+    // We need Touch Points and Interactions per student for the selected FY
+    let coachingMetrics;
+    if (tpField) {
+      // Use rollup field
+      coachingMetrics = await computeCoachingFromRollup(conn, testIds, tpField, intField, fy, fyDates);
+    } else {
+      // FY25: query Touch_Point__c directly
+      coachingMetrics = await computeCoachingFromTouchPoints(conn, testIds, intField, fyDates);
+    }
+
+    // --- Section 4: L2 Trips ---
+    const l2Trips = await computeL2Trips(conn, testIds, fyDates);
+
+    // --- Section 5-6: SO/STAM and Step Forward ---
+    const spiritualGrowth = await computeSpiritualGrowth(conn, testIds, fyDates);
+
+    // --- Section 7: Graduation ---
+    const graduation = await computeGraduation(conn, testIds, fyDates);
+
+    // --- Section 8: Classes & Events ---
+    const events = await computeClassesAndEvents(conn, testIds, fyDates);
+
+    // --- Section 9: All-time ---
+    const allTime = await computeAllTime(conn, testIds);
+
+    // --- Section 4b: Seminary ---
+    const seminary = await computeSeminary(conn, testIds, fyDates);
+
+    res.json({
+      fy,
+      fyDates,
+      coaching: coachingMetrics,
+      l2Trips,
+      seminary,
+      spiritualGrowth,
+      graduation,
+      events,
+      allTime
+    });
+  } catch (err) {
+    console.error('Error fetching executive data:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function computeCoachingFromRollup(conn, testIds, tpField, intField, fy, fyDates) {
+  // Query contacts with touch points in the selected FY
+  const fields = `Id, Touch_Points__c, ${tpField}`;
+  const intFieldStr = intField ? `, ${intField}` : '';
+  const intTotalStr = ', Interactions__c';
+
+  const records = await queryAll(conn,
+    `SELECT ${fields}${intFieldStr}${intTotalStr} FROM Contact WHERE ${tpField} > 0 AND Test_Old__c = false`
+  );
+
+  // Filter out test contacts
+  const students = records.filter(r => !testIds.has(r.Id));
+
+  const totalStudents = students.length;
+  let totalOneOnOnes = 0;
+  const tpBuckets = { '1-3': 0, '4-6': 0, '7-9': 0, '10+': 0 };
+  const intBuckets = { '1-3': 0, '4-6': 0, '7-9': 0, '10+': 0 };
+
+  for (const s of students) {
+    const tp = s[tpField] || 0;
+    totalOneOnOnes += tp;
+
+    // Bucket by TOTAL touch points (all time), not just this FY
+    const totalTP = s.Touch_Points__c || 0;
+    if (totalTP >= 10) tpBuckets['10+']++;
+    else if (totalTP >= 7) tpBuckets['7-9']++;
+    else if (totalTP >= 4) tpBuckets['4-6']++;
+    else if (totalTP >= 1) tpBuckets['1-3']++;
+
+    // Interaction buckets
+    if (intField) {
+      const intVal = s[intField] || 0;
+      if (intVal > 0) {
+        const totalInt = s.Interactions__c || 0;
+        if (totalInt >= 10) intBuckets['10+']++;
+        else if (totalInt >= 7) intBuckets['7-9']++;
+        else if (totalInt >= 4) intBuckets['4-6']++;
+        else if (totalInt >= 1) intBuckets['1-3']++;
+      }
+    }
+  }
+
+  // Interaction totals
+  let intStudents = 0;
+  if (intField) {
+    intStudents = students.filter(s => (s[intField] || 0) > 0).length;
+  }
+
+  // Average weekly one on ones
+  const fyStart = new Date(fyDates.start);
+  const now = new Date();
+  const fyEnd = new Date(fyDates.end);
+  const effectiveEnd = now < fyEnd ? now : fyEnd;
+  const weeksElapsed = Math.max(1, Math.round((effectiveEnd - fyStart) / (7 * 24 * 60 * 60 * 1000)));
+  const avgWeekly = Math.round(totalOneOnOnes / weeksElapsed);
+
+  return {
+    studentsMetCoach: totalStudents,
+    totalOneOnOnes,
+    avgWeeklyOneOnOnes: avgWeekly,
+    tpBuckets,
+    tpContinuous: tpBuckets['7-9'] + tpBuckets['10+'],
+    intStudents,
+    intBuckets,
+    intContinuous: intBuckets['7-9'] + intBuckets['10+']
+  };
+}
+
+async function computeCoachingFromTouchPoints(conn, testIds, intField, fyDates) {
+  // For FY25 (no rollup field), query Touch_Point__c directly
+  const records = await queryAll(conn,
+    `SELECT Student__c FROM Touch_Point__c
+     WHERE Touch_Point_Date__c >= ${fyDates.start} AND Touch_Point_Date__c <= ${fyDates.end}
+     AND Test__c = false`
+  );
+
+  // Count per student
+  const studentCounts = new Map();
+  for (const r of records) {
+    if (testIds.has(r.Student__c)) continue;
+    studentCounts.set(r.Student__c, (studentCounts.get(r.Student__c) || 0) + 1);
+  }
+
+  const totalStudents = studentCounts.size;
+  const totalOneOnOnes = records.filter(r => !testIds.has(r.Student__c)).length;
+
+  // For buckets, need total touch points per student (all time)
+  const studentIds = Array.from(studentCounts.keys());
+  const tpBuckets = { '1-3': 0, '4-6': 0, '7-9': 0, '10+': 0 };
+
+  if (studentIds.length > 0) {
+    // Query total touch points for these students
+    const contacts = await queryAll(conn,
+      `SELECT Id, Touch_Points__c, Interactions__c${intField ? ', ' + intField : ''} FROM Contact WHERE Id IN ('${studentIds.slice(0, 200).join("','")}') AND Test_Old__c = false`
+    );
+
+    const contactMap = new Map();
+    for (const c of contacts) contactMap.set(c.Id, c);
+
+    for (const [sid] of studentCounts) {
+      const c = contactMap.get(sid);
+      if (!c) continue;
+      const totalTP = c.Touch_Points__c || 0;
+      if (totalTP >= 10) tpBuckets['10+']++;
+      else if (totalTP >= 7) tpBuckets['7-9']++;
+      else if (totalTP >= 4) tpBuckets['4-6']++;
+      else if (totalTP >= 1) tpBuckets['1-3']++;
+    }
+  }
+
+  // Interaction data from formula fields
+  const intBuckets = { '1-3': 0, '4-6': 0, '7-9': 0, '10+': 0 };
+  let intStudents = 0;
+
+  const fyStart = new Date(fyDates.start);
+  const now = new Date();
+  const fyEnd = new Date(fyDates.end);
+  const effectiveEnd = now < fyEnd ? now : fyEnd;
+  const weeksElapsed = Math.max(1, Math.round((effectiveEnd - fyStart) / (7 * 24 * 60 * 60 * 1000)));
+  const avgWeekly = Math.round(totalOneOnOnes / weeksElapsed);
+
+  return {
+    studentsMetCoach: totalStudents,
+    totalOneOnOnes,
+    avgWeeklyOneOnOnes: avgWeekly,
+    tpBuckets,
+    tpContinuous: tpBuckets['7-9'] + tpBuckets['10+'],
+    intStudents,
+    intBuckets,
+    intContinuous: intBuckets['7-9'] + intBuckets['10+']
+  };
+}
+
+async function computeL2Trips(conn, testIds, fyDates) {
+  try {
+    const records = await queryAll(conn,
+      `SELECT Student__c FROM Olami_Activity_Engagement__c
+       WHERE Status__c = 'Attended'
+       AND Trip_Event_Start_Da__c >= ${fyDates.start}
+       AND Trip_Event_Start_Da__c <= ${fyDates.end}`
+    );
+    const uniqueStudents = new Set(records.map(r => r.Student__c).filter(id => !testIds.has(id)));
+    return { participants: uniqueStudents.size };
+  } catch (e) {
+    console.error('L2 trips query error:', e.message);
+    return { participants: null };
+  }
+}
+
+async function computeSeminary(conn, testIds, fyDates) {
+  try {
+    // Seminary placements tracked via Olami_Activity_Engagement__c
+    // with Trip_Event_Type__c containing 'Seminary' or 'Sem Trip'
+    const records = await queryAll(conn,
+      `SELECT Student__c FROM Olami_Activity_Engagement__c
+       WHERE (Trip_Event_Type__c = 'Seminary' OR Trip_Event_Type__c = 'Sem Trip')
+       AND Status__c = 'Attended'
+       AND Trip_Event_Start_Da__c >= ${fyDates.start}
+       AND Trip_Event_Start_Da__c <= ${fyDates.end}
+       AND Student__r.Test_Old__c = false`
+    );
+    const uniqueStudents = new Set(records.map(r => r.Student__c).filter(id => !testIds.has(id)));
+    return { placements: uniqueStudents.size };
+  } catch (e) {
+    console.error('Seminary query error:', e.message);
+    return { placements: null };
+  }
+}
+
+async function computeSpiritualGrowth(conn, testIds, fyDates) {
+  // SO/STAM use FY picklist fields (e.g., FY_Became_SO__c = 'FY26')
+  // Derive the FY label from the date range
+  const fyYear = new Date(fyDates.end).getFullYear();
+  const fyLabel = String(fyYear); // Picklist uses "2026" for FY26
+
+  try {
+    // Query all spiritual growth in one go
+    const records = await queryAll(conn,
+      `SELECT Id, FY_Became_SO__c, FY_Became_STAM__c,
+              FY_Became_Shomer_Kashrus__c, FY_Became_Shomer_Tznius__c,
+              FY_Became__c
+       FROM Contact
+       WHERE Test_Old__c = false
+       AND (FY_Became_SO__c = '${fyLabel}'
+            OR FY_Became_STAM__c = '${fyLabel}'
+            OR FY_Became_Shomer_Kashrus__c = '${fyLabel}'
+            OR FY_Became_Shomer_Tznius__c = '${fyLabel}'
+            OR FY_Became__c = '${fyLabel}')`
+    );
+
+    let so = 0, stam = 0, kashrus = 0, tznius = 0, marryJewish = 0;
+    const soOrStamIds = new Set();
+
+    for (const r of records) {
+      if (testIds.has(r.Id)) continue;
+      if (r.FY_Became_SO__c === fyLabel) { so++; soOrStamIds.add(r.Id); }
+      if (r.FY_Became_STAM__c === fyLabel) { stam++; soOrStamIds.add(r.Id); }
+      if (r.FY_Became_Shomer_Kashrus__c === fyLabel) kashrus++;
+      if (r.FY_Became_Shomer_Tznius__c === fyLabel) tznius++;
+      if (r.FY_Became__c === fyLabel) marryJewish++;
+    }
+
+    return { so, stam, uniqueSOSTAM: soOrStamIds.size, kashrus, tznius, marryJewish };
+  } catch (e) {
+    console.error('Spiritual growth query error:', e.message);
+    return { so: null, stam: null, uniqueSOSTAM: null, kashrus: null, tznius: null, marryJewish: null };
+  }
+}
+
+async function computeGraduation(conn, testIds, fyDates) {
+  try {
+    // Graduation tracked via Registration__c status or Stopped_Meeting_with_Coach_Reason__c
+    const records = await queryAll(conn,
+      `SELECT Id, Stopped_Meeting_with_Coach_Reason__c FROM Registration__c
+       WHERE RecordType.Name = 'Program'
+       AND (Status__c = 'Graduated' OR Stopped_Meeting_with_Coach_Reason__c LIKE '%Graduated%')
+       AND LastModifiedDate >= ${fyDates.start}T00:00:00Z
+       AND LastModifiedDate <= ${fyDates.end}T23:59:59Z
+       AND Student__r.Test_Old__c = false`
+    );
+
+    let inPerson = 0, seminary = 0, conversion = 0;
+    for (const r of records) {
+      const reason = r.Stopped_Meeting_with_Coach_Reason__c || '';
+      if (reason.includes('In Person') || reason.includes('in person')) inPerson++;
+      else if (reason.includes('Seminary') || reason.includes('seminary')) seminary++;
+      else if (reason.includes('Conversion') || reason.includes('conversion')) conversion++;
+      else inPerson++; // default
+    }
+
+    return { inPersonLearning: inPerson, longTermSeminary: seminary, orthodoxConversion: conversion };
+  } catch (e) {
+    console.error('Graduation query error:', e.message);
+    return { inPersonLearning: null, longTermSeminary: null, orthodoxConversion: null };
+  }
+}
+
+async function computeClassesAndEvents(conn, testIds, fyDates) {
+  // Many of these come from Trip/Event Engagement or Course Occurrence registrations
+  const result = {
+    videoClassesWatched: null, videoClassWatchers: null,
+    liveZoomAttendances: null, liveZoomAttendees: null,
+    coachLedCourses: null, clcStudents: null,
+    experiencesByCoaches: null, studentsAtExperiences: null,
+    weekdayEventAttendances: null, weekdayEventAttendees: null,
+    shabbatonAttendances: null, shabbatonAttendees: null
+  };
+
+  try {
+    // Experiences facilitated by coaches
+    const expRecords = await queryAll(conn,
+      `SELECT Student__c, Emersive_Learning_Experience__c FROM Olami_Activity_Engagement__c
+       WHERE Status__c = 'Attended'
+       AND Trip_Event_Type__c = 'Experience'
+       AND Trip_Event_Start_Da__c >= ${fyDates.start}
+       AND Trip_Event_Start_Da__c <= ${fyDates.end}
+       `
+    );
+    const filteredExp = expRecords.filter(r => !testIds.has(r.Student__c));
+    result.experiencesByCoaches = new Set(filteredExp.map(r => r.Emersive_Learning_Experience__c)).size;
+    result.studentsAtExperiences = new Set(filteredExp.map(r => r.Student__c)).size;
+  } catch (e) {
+    console.error('Experiences query error:', e.message);
+  }
+
+  try {
+    // Weekday events
+    const weekdayRecords = await queryAll(conn,
+      `SELECT Student__c FROM Olami_Activity_Engagement__c
+       WHERE Status__c = 'Attended'
+       AND Trip_Event_Type__c = 'Weekday_Event'
+       AND Trip_Event_Start_Da__c >= ${fyDates.start}
+       AND Trip_Event_Start_Da__c <= ${fyDates.end}`
+    );
+    const filteredWeekday = weekdayRecords.filter(r => !testIds.has(r.Student__c));
+    result.weekdayEventAttendances = filteredWeekday.length;
+    result.weekdayEventAttendees = new Set(filteredWeekday.map(r => r.Student__c)).size;
+  } catch (e) {
+    console.error('Weekday events query error:', e.message);
+  }
+
+  try {
+    // Shabbaton
+    const shabRecords = await queryAll(conn,
+      `SELECT Student__c FROM Olami_Activity_Engagement__c
+       WHERE Status__c = 'Attended'
+       AND Trip_Event_Type__c = 'Shabbaton'
+       AND Trip_Event_Start_Da__c >= ${fyDates.start}
+       AND Trip_Event_Start_Da__c <= ${fyDates.end}`
+    );
+    const filteredShab = shabRecords.filter(r => !testIds.has(r.Student__c));
+    result.shabbatonAttendances = filteredShab.length;
+    result.shabbatonAttendees = new Set(filteredShab.map(r => r.Student__c)).size;
+  } catch (e) {
+    console.error('Shabbaton query error:', e.message);
+  }
+
+  return result;
+}
+
+async function computeAllTime(conn, testIds) {
+  try {
+    const regCount = await queryAll(conn,
+      `SELECT COUNT(Id) cnt FROM Registration__c
+       WHERE RecordType.Name = 'Program' AND Student__r.Test_Old__c = false`
+    );
+
+    const metCoach = await queryAll(conn,
+      `SELECT COUNT(Id) cnt FROM Contact
+       WHERE Touch_Points__c > 0 AND Test_Old__c = false`
+    );
+
+    const metCoach3Plus = await queryAll(conn,
+      `SELECT COUNT(Id) cnt FROM Contact
+       WHERE Touch_Points__c >= 3 AND Test_Old__c = false`
+    );
+
+    return {
+      registeredForSouled: regCount[0]?.cnt || 0,
+      metWithCoach: metCoach[0]?.cnt || 0,
+      metWithCoach3Plus: metCoach3Plus[0]?.cnt || 0
+    };
+  } catch (e) {
+    console.error('All-time query error:', e.message);
+    return { registeredForSouled: null, metWithCoach: null, metWithCoach3Plus: null };
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`Retention dashboard running at http://localhost:${PORT}`);
 });

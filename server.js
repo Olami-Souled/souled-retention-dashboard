@@ -585,6 +585,9 @@ app.get('/api/executive-data', async (req, res) => {
       coachingMetrics = await computeCoachingFromTouchPoints(conn, testIds, intField, fyDates);
     }
 
+    // --- Section 3: Interaction Buckets (separate query) ---
+    const interactions = await computeInteractions(conn, testIds, intField, fy, fyDates);
+
     // --- Section 4: L2 Trips ---
     const l2Trips = await computeL2Trips(conn, testIds, fyDates);
 
@@ -602,6 +605,11 @@ app.get('/api/executive-data', async (req, res) => {
 
     // --- Section 4b: Seminary ---
     const seminary = await computeSeminary(conn, testIds, fyDates);
+
+    // Merge interactions into coaching result
+    coachingMetrics.intStudents = interactions.intStudents;
+    coachingMetrics.intBuckets = interactions.intBuckets;
+    coachingMetrics.intContinuous = interactions.intContinuous;
 
     const result = {
       fy,
@@ -787,6 +795,51 @@ async function computeCoachingFromTouchPoints(conn, testIds, intField, fyDates) 
     avgWeeklyOneOnOnes: avgWeekly,
     tpBuckets,
     tpContinuous: tpBuckets['7-9'] + tpBuckets['10+'],
+    intStudents,
+    intBuckets,
+    intContinuous: intBuckets['7-9'] + intBuckets['10+']
+  };
+}
+
+async function computeInteractions(conn, testIds, intField, fy, fyDates) {
+  // Query ALL contacts with interactions, not just those with touch points
+  let query;
+  if (intField) {
+    // FY23/FY24/FY25: use the dedicated interaction field
+    query = `SELECT Id, Interactions__c, ${intField} FROM Contact WHERE ${intField} > 0 AND Test_Old__c = false`;
+  } else {
+    // FY26: no dedicated field — derive from total minus older FYs
+    query = `SELECT Id, Interactions__c, Interactions_FY23__c, Interactions_FY24__c, Interactions_FY25__c FROM Contact WHERE Interactions__c > 0 AND Test_Old__c = false`;
+  }
+
+  const records = await queryAll(conn, query);
+  const intBuckets = { '1-3': 0, '4-6': 0, '7-9': 0, '10+': 0 };
+  let intStudents = 0;
+
+  for (const r of records) {
+    if (testIds.has(r.Id)) continue;
+
+    let fyInt = 0;
+    if (intField) {
+      fyInt = r[intField] || 0;
+    } else {
+      const total = r.Interactions__c || 0;
+      const older = (r.Interactions_FY23__c || 0) + (r.Interactions_FY24__c || 0) + (r.Interactions_FY25__c || 0);
+      fyInt = Math.max(0, total - older);
+    }
+
+    if (fyInt > 0) {
+      intStudents++;
+      // Bucket by TOTAL interactions (all time)
+      const totalInt = r.Interactions__c || 0;
+      if (totalInt >= 10) intBuckets['10+']++;
+      else if (totalInt >= 7) intBuckets['7-9']++;
+      else if (totalInt >= 4) intBuckets['4-6']++;
+      else if (totalInt >= 1) intBuckets['1-3']++;
+    }
+  }
+
+  return {
     intStudents,
     intBuckets,
     intContinuous: intBuckets['7-9'] + intBuckets['10+']

@@ -526,25 +526,62 @@ function getInteractionField(fy) {
   return map[fy] || null; // FY26 has no rollup field
 }
 
+// --- Executive data caching ---
+const fs = require('fs');
+const CACHE_DIR = path.join(__dirname, 'cache');
+if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
+
+function isFYComplete(fy) {
+  const fyDates = getFYDates(fy);
+  return new Date() > new Date(fyDates.end);
+}
+
+function getCachePath(fy) {
+  return path.join(CACHE_DIR, `${fy}.json`);
+}
+
+function readCache(fy) {
+  const cachePath = getCachePath(fy);
+  if (fs.existsSync(cachePath)) {
+    return JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+  }
+  return null;
+}
+
+function writeCache(fy, data) {
+  fs.writeFileSync(getCachePath(fy), JSON.stringify(data, null, 2));
+  console.log(`Cached ${fy} executive data to ${getCachePath(fy)}`);
+}
+
 // --- /api/executive-data ---
 app.get('/api/executive-data', async (req, res) => {
   try {
+    const fy = req.query.fy || 'FY26';
+    const forceRefresh = req.query.refresh === 'true';
+
+    // For completed FYs, serve from cache if available
+    if (isFYComplete(fy) && !forceRefresh) {
+      const cached = readCache(fy);
+      if (cached) {
+        console.log(`Serving ${fy} from cache`);
+        return res.json(cached);
+      }
+    }
+
+    // Fetch live from Salesforce
+    console.log(`Fetching ${fy} live from Salesforce...`);
     const conn = await getSfConnection();
     const testIds = await getTestContactIds(conn);
-    const fy = req.query.fy || 'FY26';
     const fyDates = getFYDates(fy);
 
     const tpField = getTouchPointField(fy);
     const intField = getInteractionField(fy);
 
     // --- Section 1-3: Coaching & Buckets ---
-    // We need Touch Points and Interactions per student for the selected FY
     let coachingMetrics;
     if (tpField) {
-      // Use rollup field
       coachingMetrics = await computeCoachingFromRollup(conn, testIds, tpField, intField, fy, fyDates);
     } else {
-      // FY25: query Touch_Point__c directly
       coachingMetrics = await computeCoachingFromTouchPoints(conn, testIds, intField, fyDates);
     }
 
@@ -566,9 +603,10 @@ app.get('/api/executive-data', async (req, res) => {
     // --- Section 4b: Seminary ---
     const seminary = await computeSeminary(conn, testIds, fyDates);
 
-    res.json({
+    const result = {
       fy,
       fyDates,
+      cachedAt: new Date().toISOString(),
       coaching: coachingMetrics,
       l2Trips,
       seminary,
@@ -576,7 +614,14 @@ app.get('/api/executive-data', async (req, res) => {
       graduation,
       events,
       allTime
-    });
+    };
+
+    // Cache completed FYs to disk
+    if (isFYComplete(fy)) {
+      writeCache(fy, result);
+    }
+
+    res.json(result);
   } catch (err) {
     console.error('Error fetching executive data:', err);
     res.status(500).json({ error: err.message });
@@ -670,10 +715,12 @@ async function computeCoachingFromRollup(conn, testIds, tpField, intField, fy, f
 
 async function computeCoachingFromTouchPoints(conn, testIds, intField, fyDates) {
   // For FY25 (no rollup field), query Touch_Point__c directly
+  // Include Relationship to filter for Souled Coach only
   const records = await queryAll(conn,
-    `SELECT Student__c FROM Touch_Point__c
+    `SELECT Student__c, Relationship__r.Type__c FROM Touch_Point__c
      WHERE Touch_Point_Date__c >= ${fyDates.start} AND Touch_Point_Date__c <= ${fyDates.end}
-     AND Test__c = false`
+     AND Test__c = false
+     AND Relationship__r.Type__c = 'Souled Coach'`
   );
 
   // Count per student
@@ -684,35 +731,48 @@ async function computeCoachingFromTouchPoints(conn, testIds, intField, fyDates) 
   }
 
   const totalStudents = studentCounts.size;
-  const totalOneOnOnes = records.filter(r => !testIds.has(r.Student__c)).length;
+  let totalOneOnOnes = 0;
+  for (const [, count] of studentCounts) totalOneOnOnes += count;
 
   // For buckets, need total touch points per student (all time)
+  // Query in batches to avoid SOQL length limits
   const studentIds = Array.from(studentCounts.keys());
   const tpBuckets = { '1-3': 0, '4-6': 0, '7-9': 0, '10+': 0 };
+  const intBuckets = { '1-3': 0, '4-6': 0, '7-9': 0, '10+': 0 };
+  let intStudents = 0;
 
-  if (studentIds.length > 0) {
-    // Query total touch points for these students
+  const intFields = intField ? `, ${intField}` : ', Interactions_FY23__c, Interactions_FY24__c, Interactions_FY25__c';
+  const batchSize = 500;
+  for (let i = 0; i < studentIds.length; i += batchSize) {
+    const batch = studentIds.slice(i, i + batchSize);
     const contacts = await queryAll(conn,
-      `SELECT Id, Touch_Points__c, Interactions__c${intField ? ', ' + intField : ''} FROM Contact WHERE Id IN ('${studentIds.slice(0, 200).join("','")}') AND Test_Old__c = false`
+      `SELECT Id, Touch_Points__c, Interactions__c${intFields} FROM Contact WHERE Id IN ('${batch.join("','")}') AND Test_Old__c = false`
     );
 
-    const contactMap = new Map();
-    for (const c of contacts) contactMap.set(c.Id, c);
-
-    for (const [sid] of studentCounts) {
-      const c = contactMap.get(sid);
-      if (!c) continue;
+    for (const c of contacts) {
       const totalTP = c.Touch_Points__c || 0;
       if (totalTP >= 10) tpBuckets['10+']++;
       else if (totalTP >= 7) tpBuckets['7-9']++;
       else if (totalTP >= 4) tpBuckets['4-6']++;
       else if (totalTP >= 1) tpBuckets['1-3']++;
+
+      // Interactions
+      const totalInt = c.Interactions__c || 0;
+      let fyInt = 0;
+      if (intField) {
+        fyInt = c[intField] || 0;
+      } else {
+        fyInt = Math.max(0, totalInt - (c.Interactions_FY23__c || 0) - (c.Interactions_FY24__c || 0) - (c.Interactions_FY25__c || 0));
+      }
+      if (fyInt > 0) {
+        intStudents++;
+        if (totalInt >= 10) intBuckets['10+']++;
+        else if (totalInt >= 7) intBuckets['7-9']++;
+        else if (totalInt >= 4) intBuckets['4-6']++;
+        else if (totalInt >= 1) intBuckets['1-3']++;
+      }
     }
   }
-
-  // Interaction data from formula fields
-  const intBuckets = { '1-3': 0, '4-6': 0, '7-9': 0, '10+': 0 };
-  let intStudents = 0;
 
   const fyStart = new Date(fyDates.start);
   const now = new Date();

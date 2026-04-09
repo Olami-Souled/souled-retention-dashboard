@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const jsforce = require('jsforce');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -527,9 +528,9 @@ function getInteractionField(fy) {
 }
 
 // --- Executive data caching ---
-const fs = require('fs');
 const CACHE_DIR = path.join(__dirname, 'cache');
-if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR);
+try { if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true }); }
+catch (e) { console.error('Could not create cache dir:', e.message); }
 
 function isFYComplete(fy) {
   const fyDates = getFYDates(fy);
@@ -549,8 +550,12 @@ function readCache(fy) {
 }
 
 function writeCache(fy, data) {
-  fs.writeFileSync(getCachePath(fy), JSON.stringify(data, null, 2));
-  console.log(`Cached ${fy} executive data to ${getCachePath(fy)}`);
+  try {
+    fs.writeFileSync(getCachePath(fy), JSON.stringify(data, null, 2));
+    console.log(`Cached ${fy} executive data to ${getCachePath(fy)}`);
+  } catch (e) {
+    console.error(`Could not write cache for ${fy}:`, e.message);
+  }
 }
 
 // --- /api/executive-data ---

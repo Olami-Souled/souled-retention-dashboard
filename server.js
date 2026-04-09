@@ -586,7 +586,7 @@ app.get('/api/executive-data', async (req, res) => {
 async function computeCoachingFromRollup(conn, testIds, tpField, intField, fy, fyDates) {
   // Query contacts with touch points in the selected FY
   const fields = `Id, Touch_Points__c, ${tpField}`;
-  const intFieldStr = intField ? `, ${intField}` : '';
+  const intFieldStr = intField ? `, ${intField}` : ', Interactions_FY23__c, Interactions_FY24__c, Interactions_FY25__c';
   const intTotalStr = ', Interactions__c';
 
   const records = await queryAll(conn,
@@ -612,23 +612,40 @@ async function computeCoachingFromRollup(conn, testIds, tpField, intField, fy, f
     else if (totalTP >= 4) tpBuckets['4-6']++;
     else if (totalTP >= 1) tpBuckets['1-3']++;
 
-    // Interaction buckets
+    // Interaction buckets — for FY26, derive from total minus older FYs
+    const totalInt = s.Interactions__c || 0;
+    let fyInt = 0;
     if (intField) {
-      const intVal = s[intField] || 0;
-      if (intVal > 0) {
-        const totalInt = s.Interactions__c || 0;
-        if (totalInt >= 10) intBuckets['10+']++;
-        else if (totalInt >= 7) intBuckets['7-9']++;
-        else if (totalInt >= 4) intBuckets['4-6']++;
-        else if (totalInt >= 1) intBuckets['1-3']++;
-      }
+      fyInt = s[intField] || 0;
+    } else {
+      // FY26: no dedicated field, derive from total - FY23 - FY24 - FY25
+      const i23 = s.Interactions_FY23__c || 0;
+      const i24 = s.Interactions_FY24__c || 0;
+      const i25 = s.Interactions_FY25__c || 0;
+      fyInt = Math.max(0, totalInt - i23 - i24 - i25);
+    }
+    if (fyInt > 0) {
+      if (totalInt >= 10) intBuckets['10+']++;
+      else if (totalInt >= 7) intBuckets['7-9']++;
+      else if (totalInt >= 4) intBuckets['4-6']++;
+      else if (totalInt >= 1) intBuckets['1-3']++;
     }
   }
 
   // Interaction totals
   let intStudents = 0;
-  if (intField) {
-    intStudents = students.filter(s => (s[intField] || 0) > 0).length;
+  for (const s of students) {
+    let fyInt = 0;
+    if (intField) {
+      fyInt = s[intField] || 0;
+    } else {
+      const total = s.Interactions__c || 0;
+      const i23 = s.Interactions_FY23__c || 0;
+      const i24 = s.Interactions_FY24__c || 0;
+      const i25 = s.Interactions_FY25__c || 0;
+      fyInt = Math.max(0, total - i23 - i24 - i25);
+    }
+    if (fyInt > 0) intStudents++;
   }
 
   // Average weekly one on ones
@@ -821,63 +838,99 @@ async function computeGraduation(conn, testIds, fyDates) {
 }
 
 async function computeClassesAndEvents(conn, testIds, fyDates) {
-  // Many of these come from Trip/Event Engagement or Course Occurrence registrations
   const result = {
-    videoClassesWatched: null, videoClassWatchers: null,
-    liveZoomAttendances: null, liveZoomAttendees: null,
-    coachLedCourses: null, clcStudents: null,
-    experiencesByCoaches: null, studentsAtExperiences: null,
-    weekdayEventAttendances: null, weekdayEventAttendees: null,
-    shabbatonAttendances: null, shabbatonAttendees: null
+    videoClassesWatched: 0, videoClassWatchers: 0,
+    liveZoomAttendances: 0, liveZoomAttendees: 0,
+    coachLedCourses: 0, clcStudents: 0,
+    experiencesByCoaches: 0, studentsAtExperiences: 0,
+    weekdayEventAttendances: 0, weekdayEventAttendees: 0,
+    shabbatonAttendances: 0, shabbatonAttendees: 0
   };
 
+  // Video and Zoom classes from Registration__c (Course Occurrence)
   try {
-    // Experiences facilitated by coaches
-    const expRecords = await queryAll(conn,
-      `SELECT Student__c, Emersive_Learning_Experience__c FROM Olami_Activity_Engagement__c
-       WHERE Status__c = 'Attended'
-       AND Trip_Event_Type__c = 'Experience'
-       AND Trip_Event_Start_Da__c >= ${fyDates.start}
-       AND Trip_Event_Start_Da__c <= ${fyDates.end}
-       `
+    const courseRegs = await queryAll(conn,
+      `SELECT Student__c, Record_type_of_course_occurence__c, Completed_Classes__c
+       FROM Registration__c
+       WHERE RecordType.Name = 'Course Occurrence'
+       AND CreatedDate >= ${fyDates.start}T00:00:00Z
+       AND CreatedDate <= ${fyDates.end}T23:59:59Z
+       AND Student__r.Test_Old__c = false`
     );
-    const filteredExp = expRecords.filter(r => !testIds.has(r.Student__c));
-    result.experiencesByCoaches = new Set(filteredExp.map(r => r.Emersive_Learning_Experience__c)).size;
-    result.studentsAtExperiences = new Set(filteredExp.map(r => r.Student__c)).size;
+    const videoStudents = new Set();
+    const zoomStudents = new Set();
+    let videoWatched = 0, zoomAttendances = 0;
+
+    for (const r of courseRegs) {
+      if (testIds.has(r.Student__c)) continue;
+      const completed = r.Completed_Classes__c || 0;
+      if (r.Record_type_of_course_occurence__c === 'On Demand') {
+        videoWatched += completed;
+        if (completed > 0) videoStudents.add(r.Student__c);
+      } else if (r.Record_type_of_course_occurence__c === 'Live') {
+        zoomAttendances += completed;
+        if (completed > 0) zoomStudents.add(r.Student__c);
+      }
+    }
+    result.videoClassesWatched = videoWatched;
+    result.videoClassWatchers = videoStudents.size;
+    result.liveZoomAttendances = zoomAttendances;
+    result.liveZoomAttendees = zoomStudents.size;
   } catch (e) {
-    console.error('Experiences query error:', e.message);
+    console.error('Course occurrence query error:', e.message);
   }
 
+  // Coach-Led Courses (CLCs) from Contact_Coach_Course_Engagement__c
   try {
-    // Weekday events
-    const weekdayRecords = await queryAll(conn,
-      `SELECT Student__c FROM Olami_Activity_Engagement__c
+    const clcRecords = await queryAll(conn,
+      `SELECT Coach_Course__c, Student_Name__c FROM Contact_Coach_Course_Engagement__c
+       WHERE Started_Date__c >= ${fyDates.start}
+       AND Started_Date__c <= ${fyDates.end}`
+    );
+    result.coachLedCourses = new Set(clcRecords.map(r => r.Coach_Course__c)).size;
+    result.clcStudents = clcRecords.length;
+  } catch (e) {
+    console.error('CLC query error:', e.message);
+  }
+
+  // Trip/Event Engagements (Weekday Events, Shabbatons)
+  try {
+    const engagements = await queryAll(conn,
+      `SELECT Student__c, Emersive_Learning_Experience__c, Trip_Event_Type__c
+       FROM Olami_Activity_Engagement__c
        WHERE Status__c = 'Attended'
-       AND Trip_Event_Type__c = 'Weekday_Event'
        AND Trip_Event_Start_Da__c >= ${fyDates.start}
        AND Trip_Event_Start_Da__c <= ${fyDates.end}`
     );
-    const filteredWeekday = weekdayRecords.filter(r => !testIds.has(r.Student__c));
-    result.weekdayEventAttendances = filteredWeekday.length;
-    result.weekdayEventAttendees = new Set(filteredWeekday.map(r => r.Student__c)).size;
-  } catch (e) {
-    console.error('Weekday events query error:', e.message);
-  }
+    const filtered = engagements.filter(r => !testIds.has(r.Student__c));
 
-  try {
-    // Shabbaton
-    const shabRecords = await queryAll(conn,
-      `SELECT Student__c FROM Olami_Activity_Engagement__c
-       WHERE Status__c = 'Attended'
-       AND Trip_Event_Type__c = 'Shabbaton'
-       AND Trip_Event_Start_Da__c >= ${fyDates.start}
-       AND Trip_Event_Start_Da__c <= ${fyDates.end}`
-    );
-    const filteredShab = shabRecords.filter(r => !testIds.has(r.Student__c));
-    result.shabbatonAttendances = filteredShab.length;
-    result.shabbatonAttendees = new Set(filteredShab.map(r => r.Student__c)).size;
+    const expEvents = new Set();
+    const expStudents = new Set();
+    const weekdayStudents = new Set();
+    let weekdayCount = 0;
+    const shabStudents = new Set();
+    let shabCount = 0;
+
+    for (const r of filtered) {
+      expEvents.add(r.Emersive_Learning_Experience__c);
+      expStudents.add(r.Student__c);
+      if (r.Trip_Event_Type__c === 'Weekday_Event') {
+        weekdayCount++;
+        weekdayStudents.add(r.Student__c);
+      } else if (r.Trip_Event_Type__c === 'Shabbaton') {
+        shabCount++;
+        shabStudents.add(r.Student__c);
+      }
+    }
+
+    result.experiencesByCoaches = expEvents.size;
+    result.studentsAtExperiences = expStudents.size;
+    result.weekdayEventAttendances = weekdayCount;
+    result.weekdayEventAttendees = weekdayStudents.size;
+    result.shabbatonAttendances = shabCount;
+    result.shabbatonAttendees = shabStudents.size;
   } catch (e) {
-    console.error('Shabbaton query error:', e.message);
+    console.error('Events query error:', e.message);
   }
 
   return result;

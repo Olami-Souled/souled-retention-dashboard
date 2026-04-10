@@ -516,6 +516,12 @@ function getFYDates(fy) {
   };
 }
 
+// Get FY string from dates
+function getFYFromDates(fyDates) {
+  const year = new Date(fyDates.end).getFullYear();
+  return `FY${year - 2000}`;
+}
+
 // Map FY to the Contact rollup field names
 // NOTE: Touch_Points_FY25__c is labeled "FY26" (repurposed)
 function getTouchPointField(fy) {
@@ -856,6 +862,7 @@ async function computeL2Trips(conn, testIds, fyDates) {
     const records = await queryAll(conn,
       `SELECT Student__c FROM Olami_Activity_Engagement__c
        WHERE Status__c = 'Attended'
+       AND Olami_Trip_Level__c = 2
        AND Trip_Event_Start_Da__c >= ${fyDates.start}
        AND Trip_Event_Start_Da__c <= ${fyDates.end}`
     );
@@ -870,13 +877,21 @@ async function computeL2Trips(conn, testIds, fyDates) {
 async function computeSeminary(conn, testIds, fyDates) {
   try {
     // Seminary placements tracked via Olami_Activity_Engagement__c
-    // with Trip_Event_Type__c containing 'Seminary' or 'Sem Trip'
+    // Report includes many positive statuses (not just 'Attended')
+    const positiveStatuses = [
+      'Applied for Morasha Funding', 'Accepted', 'Applied for Scholarship',
+      'Scholarship Approved', 'Registered', 'Paid',
+      'Flight itinerary received from travel agent', 'Flight itinerary sent to student',
+      'Flight itinerary confirmed', 'Booked Ticket', 'Attended',
+      'Applied for Program', 'Accepted to Program', 'Recommended', 'Will_Apply_for_Program', 'Applied'
+    ];
+    const statusFilter = positiveStatuses.map(s => `'${s}'`).join(',');
     const records = await queryAll(conn,
       `SELECT Student__c FROM Olami_Activity_Engagement__c
        WHERE (Trip_Event_Type__c = 'Seminary' OR Trip_Event_Type__c = 'Sem Trip')
-       AND Status__c = 'Attended'
-       AND Trip_Event_Start_Da__c >= ${fyDates.start}
-       AND Trip_Event_Start_Da__c <= ${fyDates.end}
+       AND Status__c IN (${statusFilter})
+       AND Combined_start_date__c != null
+       AND (End_Date_Combined__c >= ${fyDates.start} OR End_Date_Combined__c = null)
        AND Student__r.Test_Old__c = false`
     );
     const uniqueStudents = new Set(records.map(r => r.Student__c).filter(id => !testIds.has(id)));
@@ -901,6 +916,7 @@ async function computeSpiritualGrowth(conn, testIds, fyDates) {
               FY_Became__c
        FROM Contact
        WHERE Test_Old__c = false
+       AND Is_Registered_for_Souled__c > 0
        AND (FY_Became_SO__c = '${fyLabel}'
             OR FY_Became_STAM__c = '${fyLabel}'
             OR FY_Became_Shomer_Kashrus__c = '${fyLabel}'
@@ -929,23 +945,41 @@ async function computeSpiritualGrowth(conn, testIds, fyDates) {
 
 async function computeGraduation(conn, testIds, fyDates) {
   try {
-    // Graduation tracked via Registration__c status or Stopped_Meeting_with_Coach_Reason__c
+    // Graduation tracked via Registration__c Stopped_Meeting_with_Coach_Reason__c
+    // Report filters by touch points in current FY (not by date)
+    // and Program__c = 'Souled'
+    const graduationReasons = [
+      'Connected with in-person learning',
+      'Went to seminary',
+      'Graduated to Orthodox conversion',
+      'Graduated (became frum)'
+    ];
+    const reasonFilter = graduationReasons.map(r => `'${r}'`).join(',');
+
+    // Determine the touch point field for this FY to filter for active students
+    const tpField = getTouchPointField(getFYFromDates(fyDates));
+
+    let tpFilter = '';
+    if (tpField) {
+      tpFilter = ` AND Student__r.${tpField} >= 1`;
+    }
+
     const records = await queryAll(conn,
-      `SELECT Id, Stopped_Meeting_with_Coach_Reason__c FROM Registration__c
+      `SELECT Id, Student__c, Stopped_Meeting_with_Coach_Reason__c FROM Registration__c
        WHERE RecordType.Name = 'Program'
-       AND (Status__c = 'Graduated' OR Stopped_Meeting_with_Coach_Reason__c LIKE '%Graduated%')
-       AND LastModifiedDate >= ${fyDates.start}T00:00:00Z
-       AND LastModifiedDate <= ${fyDates.end}T23:59:59Z
-       AND Student__r.Test_Old__c = false`
+       AND Program__r.Name = 'Souled'
+       AND Stopped_Meeting_with_Coach_Reason__c IN (${reasonFilter})
+       AND Student__r.Test_Old__c = false${tpFilter}`
     );
 
     let inPerson = 0, seminary = 0, conversion = 0;
     for (const r of records) {
+      if (testIds.has(r.Student__c)) continue;
       const reason = r.Stopped_Meeting_with_Coach_Reason__c || '';
-      if (reason.includes('In Person') || reason.includes('in person')) inPerson++;
-      else if (reason.includes('Seminary') || reason.includes('seminary')) seminary++;
-      else if (reason.includes('Conversion') || reason.includes('conversion')) conversion++;
-      else inPerson++; // default
+      if (reason === 'Connected with in-person learning') inPerson++;
+      else if (reason === 'Went to seminary') seminary++;
+      else if (reason === 'Graduated to Orthodox conversion') conversion++;
+      else if (reason === 'Graduated (became frum)') inPerson++; // counts as in-person learning
     }
 
     return { inPersonLearning: inPerson, longTermSeminary: seminary, orthodoxConversion: conversion };
@@ -965,29 +999,31 @@ async function computeClassesAndEvents(conn, testIds, fyDates) {
     shabbatonAttendances: 0, shabbatonAttendees: 0
   };
 
-  // Video and Zoom classes from Registration__c (Course Occurrence)
+  // Video and Zoom classes from Class_Attendance__c
+  // Report filter logic: 1 AND 2 AND 3 AND (4 OR 5)
+  // Duration >= 2 min (live) OR Watched_Recording >= 10% (recorded)
   try {
-    const courseRegs = await queryAll(conn,
-      `SELECT Student__c, Record_type_of_course_occurence__c, Completed_Classes__c
-       FROM Registration__c
-       WHERE RecordType.Name = 'Course Occurrence'
+    const attendances = await queryAll(conn,
+      `SELECT Student__c, Course_Occurrence_Type__c
+       FROM Class_Attendance__c
+       WHERE Student__r.Is_Registered_for_Souled__c = 1
+       AND Student__r.Test_Old__c = false
        AND CreatedDate >= ${fyDates.start}T00:00:00Z
        AND CreatedDate <= ${fyDates.end}T23:59:59Z
-       AND Student__r.Test_Old__c = false`
+       AND (Duration_in_Minutes__c >= 2 OR Watched_Recording__c >= 10)`
     );
     const videoStudents = new Set();
     const zoomStudents = new Set();
     let videoWatched = 0, zoomAttendances = 0;
 
-    for (const r of courseRegs) {
+    for (const r of attendances) {
       if (testIds.has(r.Student__c)) continue;
-      const completed = r.Completed_Classes__c || 0;
-      if (r.Record_type_of_course_occurence__c === 'On Demand') {
-        videoWatched += completed;
-        if (completed > 0) videoStudents.add(r.Student__c);
-      } else if (r.Record_type_of_course_occurence__c === 'Live') {
-        zoomAttendances += completed;
-        if (completed > 0) zoomStudents.add(r.Student__c);
+      if (r.Course_Occurrence_Type__c === 'On_Demand') {
+        videoWatched++;
+        videoStudents.add(r.Student__c);
+      } else if (r.Course_Occurrence_Type__c === 'Live') {
+        zoomAttendances++;
+        zoomStudents.add(r.Student__c);
       }
     }
     result.videoClassesWatched = videoWatched;
@@ -995,7 +1031,7 @@ async function computeClassesAndEvents(conn, testIds, fyDates) {
     result.liveZoomAttendances = zoomAttendances;
     result.liveZoomAttendees = zoomStudents.size;
   } catch (e) {
-    console.error('Course occurrence query error:', e.message);
+    console.error('Class attendance query error:', e.message);
   }
 
   // Coach-Led Courses (CLCs) from Contact_Coach_Course_Engagement__c
@@ -1003,35 +1039,66 @@ async function computeClassesAndEvents(conn, testIds, fyDates) {
     const clcRecords = await queryAll(conn,
       `SELECT Coach_Course__c, Student_Name__c FROM Contact_Coach_Course_Engagement__c
        WHERE Started_Date__c >= ${fyDates.start}
-       AND Started_Date__c <= ${fyDates.end}`
+       AND Started_Date__c <= ${fyDates.end}
+       AND (Status__c = 'Completed' OR Status__c = 'Learning')`
     );
-    result.coachLedCourses = new Set(clcRecords.map(r => r.Coach_Course__c)).size;
-    result.clcStudents = clcRecords.length;
+    result.coachLedCourses = clcRecords.length;
+    result.clcStudents = new Set(clcRecords.map(r => r.Student_Name__c)).size;
   } catch (e) {
     console.error('CLC query error:', e.message);
+  }
+
+  // Experiences facilitated by coaches from Experience__c
+  try {
+    const experiences = await queryAll(conn,
+      `SELECT Id FROM Experience__c
+       WHERE RecordType.Name = 'Not Souled Event'
+       AND Date__c >= ${fyDates.start}
+       AND Date__c <= ${fyDates.end}`
+    );
+    result.experiencesByCoaches = experiences.length;
+  } catch (e) {
+    console.error('Experiences query error:', e.message);
+  }
+
+  // Students at experiences from Class_Attendance__c (Experience record type)
+  try {
+    const expAttendances = await queryAll(conn,
+      `SELECT Student__c FROM Class_Attendance__c
+       WHERE RecordType.Name = 'Experience'
+       AND Student__r.Is_Registered_for_Souled__c = 1
+       AND Student__r.Test_Old__c = false
+       AND CreatedDate >= ${fyDates.start}T00:00:00Z
+       AND CreatedDate <= ${fyDates.end}T23:59:59Z`
+    );
+    const expStudents = new Set();
+    for (const r of expAttendances) {
+      if (r.Student__c && !testIds.has(r.Student__c)) {
+        expStudents.add(r.Student__c);
+      }
+    }
+    result.studentsAtExperiences = expStudents.size;
+  } catch (e) {
+    console.error('Experience attendance query error:', e.message);
   }
 
   // Trip/Event Engagements (Weekday Events, Shabbatons)
   try {
     const engagements = await queryAll(conn,
-      `SELECT Student__c, Emersive_Learning_Experience__c, Trip_Event_Type__c
+      `SELECT Student__c, Trip_Event_Type__c
        FROM Olami_Activity_Engagement__c
        WHERE Status__c = 'Attended'
        AND Trip_Event_Start_Da__c >= ${fyDates.start}
        AND Trip_Event_Start_Da__c <= ${fyDates.end}`
     );
-    const filtered = engagements.filter(r => !testIds.has(r.Student__c));
 
-    const expEvents = new Set();
-    const expStudents = new Set();
     const weekdayStudents = new Set();
     let weekdayCount = 0;
     const shabStudents = new Set();
     let shabCount = 0;
 
-    for (const r of filtered) {
-      expEvents.add(r.Emersive_Learning_Experience__c);
-      expStudents.add(r.Student__c);
+    for (const r of engagements) {
+      if (testIds.has(r.Student__c)) continue;
       if (r.Trip_Event_Type__c === 'Weekday_Event') {
         weekdayCount++;
         weekdayStudents.add(r.Student__c);
@@ -1041,8 +1108,6 @@ async function computeClassesAndEvents(conn, testIds, fyDates) {
       }
     }
 
-    result.experiencesByCoaches = expEvents.size;
-    result.studentsAtExperiences = expStudents.size;
     result.weekdayEventAttendances = weekdayCount;
     result.weekdayEventAttendees = weekdayStudents.size;
     result.shabbatonAttendances = shabCount;
@@ -1057,18 +1122,18 @@ async function computeClassesAndEvents(conn, testIds, fyDates) {
 async function computeAllTime(conn, testIds) {
   try {
     const regCount = await queryAll(conn,
-      `SELECT COUNT(Id) cnt FROM Registration__c
-       WHERE RecordType.Name = 'Program' AND Student__r.Test_Old__c = false`
+      `SELECT COUNT(Id) cnt FROM Contact
+       WHERE Is_Registered_for_Souled__c > 0 AND Test_Old__c = false`
     );
 
     const metCoach = await queryAll(conn,
       `SELECT COUNT(Id) cnt FROM Contact
-       WHERE Touch_Points__c > 0 AND Test_Old__c = false`
+       WHERE Touch_Points__c > 0 AND Is_Registered_for_Souled__c > 0 AND Test_Old__c = false`
     );
 
     const metCoach3Plus = await queryAll(conn,
       `SELECT COUNT(Id) cnt FROM Contact
-       WHERE Touch_Points__c >= 3 AND Test_Old__c = false`
+       WHERE Touch_Points__c >= 3 AND Is_Registered_for_Souled__c > 0 AND Test_Old__c = false`
     );
 
     return {

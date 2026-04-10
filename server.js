@@ -903,37 +903,42 @@ async function computeSeminary(conn, testIds, fyDates) {
 }
 
 async function computeSpiritualGrowth(conn, testIds, fyDates) {
-  // SO/STAM use FY picklist fields (e.g., FY_Became_SO__c = 'FY26')
-  // Derive the FY label from the date range
-  const fyYear = new Date(fyDates.end).getFullYear();
-  const fyLabel = String(fyYear); // Picklist uses "2026" for FY26
-
+  // Use Date_Became_* fields with FY date boundaries (Sep 1 - Aug 31)
+  // This works for all FYs including current year (unlike FY picklist fields
+  // which may not be populated for the current FY)
   try {
-    // Query all spiritual growth in one go
     const records = await queryAll(conn,
-      `SELECT Id, FY_Became_SO__c, FY_Became_STAM__c,
-              FY_Became_Shomer_Kashrus__c, FY_Became_Shomer_Tznius__c,
-              FY_Became__c
+      `SELECT Id, Date_Became_SO__c, Date_Became_STAM__c,
+              Date_Became_Shomer_Kashrus__c, Date_Became_Shome_Tznius__c,
+              Date_Became_Committed_to_Marry_Jewish__c
        FROM Contact
        WHERE Test_Old__c = false
        AND Is_Registered_for_Souled__c > 0
-       AND (FY_Became_SO__c = '${fyLabel}'
-            OR FY_Became_STAM__c = '${fyLabel}'
-            OR FY_Became_Shomer_Kashrus__c = '${fyLabel}'
-            OR FY_Became_Shomer_Tznius__c = '${fyLabel}'
-            OR FY_Became__c = '${fyLabel}')`
+       AND (Date_Became_SO__c >= ${fyDates.start}
+            OR Date_Became_STAM__c >= ${fyDates.start}
+            OR Date_Became_Shomer_Kashrus__c >= ${fyDates.start}
+            OR Date_Became_Shome_Tznius__c >= ${fyDates.start}
+            OR Date_Became_Committed_to_Marry_Jewish__c >= ${fyDates.start})`
     );
+
+    const start = new Date(fyDates.start);
+    const end = new Date(fyDates.end);
+    function inFY(dateStr) {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      return d >= start && d <= end;
+    }
 
     let so = 0, stam = 0, kashrus = 0, tznius = 0, marryJewish = 0;
     const soOrStamIds = new Set();
 
     for (const r of records) {
       if (testIds.has(r.Id)) continue;
-      if (r.FY_Became_SO__c === fyLabel) { so++; soOrStamIds.add(r.Id); }
-      if (r.FY_Became_STAM__c === fyLabel) { stam++; soOrStamIds.add(r.Id); }
-      if (r.FY_Became_Shomer_Kashrus__c === fyLabel) kashrus++;
-      if (r.FY_Became_Shomer_Tznius__c === fyLabel) tznius++;
-      if (r.FY_Became__c === fyLabel) marryJewish++;
+      if (inFY(r.Date_Became_SO__c)) { so++; soOrStamIds.add(r.Id); }
+      if (inFY(r.Date_Became_STAM__c)) { stam++; soOrStamIds.add(r.Id); }
+      if (inFY(r.Date_Became_Shomer_Kashrus__c)) kashrus++;
+      if (inFY(r.Date_Became_Shome_Tznius__c)) tznius++;
+      if (inFY(r.Date_Became_Committed_to_Marry_Jewish__c)) marryJewish++;
     }
 
     return { so, stam, uniqueSOSTAM: soOrStamIds.size, kashrus, tznius, marryJewish };

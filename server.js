@@ -529,8 +529,9 @@ function getTouchPointField(fy) {
   return map[fy] || null; // FY25 has no rollup field
 }
 function getInteractionField(fy) {
-  const map = { FY23: 'Interactions_FY23__c', FY24: 'Interactions_FY24__c', FY25: 'Interactions_FY25__c' };
-  return map[fy] || null; // FY26 has no rollup field
+  // NOTE: Interactions_FY25__c is labeled "FY25" but actually tracks FY26 (repurposed, like Touch_Points_FY25__c)
+  const map = { FY23: 'Interactions_FY23__c', FY24: 'Interactions_FY24__c', FY26: 'Interactions_FY25__c' };
+  return map[fy] || null; // FY25 has no rollup field
 }
 
 // --- Executive data caching ---
@@ -676,13 +677,13 @@ async function computeCoachingFromRollup(conn, testIds, tpField, intField, fy, f
     else if (totalTP >= 4) tpBuckets['4-6']++;
     else if (totalTP >= 1) tpBuckets['1-3']++;
 
-    // Interaction buckets — for FY26, derive from total minus older FYs
+    // Interaction buckets — for FYs without a rollup, derive from total minus other FYs
     const totalInt = s.Interactions__c || 0;
     let fyInt = 0;
     if (intField) {
       fyInt = s[intField] || 0;
     } else {
-      // FY26: no dedicated field, derive from total - FY23 - FY24 - FY25
+      // FY25: no dedicated field, derive from total - FY23 - FY24 - FY26(labeled FY25)
       const i23 = s.Interactions_FY23__c || 0;
       const i24 = s.Interactions_FY24__c || 0;
       const i25 = s.Interactions_FY25__c || 0;
@@ -816,10 +817,10 @@ async function computeInteractions(conn, testIds, intField, fy, fyDates) {
   // Query ALL contacts with interactions, not just those with touch points
   let query;
   if (intField) {
-    // FY23/FY24/FY25: use the dedicated interaction field
+    // FY23/FY24/FY26: use the dedicated interaction field
     query = `SELECT Id, Interactions__c, ${intField} FROM Contact WHERE ${intField} > 0 AND Test_Old__c = false`;
   } else {
-    // FY26: no dedicated field — derive from total minus older FYs
+    // FY25: no dedicated field — derive from total minus other FYs
     query = `SELECT Id, Interactions__c, Interactions_FY23__c, Interactions_FY24__c, Interactions_FY25__c FROM Contact WHERE Interactions__c > 0 AND Test_Old__c = false`;
   }
 

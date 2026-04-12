@@ -9,6 +9,9 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Redirect old URLs
+app.get('/executive.html', (req, res) => res.redirect('/'));
+
 // --- Salesforce connection ---
 let sfConn = null;
 

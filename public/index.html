@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Souled Retention Dashboard</title>
+  <title>Souled Executive Report</title>
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
   <link rel="stylesheet" href="style.css">
@@ -11,185 +11,37 @@
 </head>
 <body>
   <nav class="top-nav">
-    <a href="index.html" class="nav-link active">Retention Dashboard</a>
-    <a href="executive.html" class="nav-link">Executive Report</a>
+    <a href="index.html" class="nav-link active">Executive Report</a>
+    <a href="retention.html" class="nav-link">Retention Report</a>
   </nav>
 
   <header>
     <img src="logo.png" alt="Olami Souled" class="header-logo">
-    <h1>Student Retention — Cohort Analysis</h1>
+    <h1>Souled Executive Report</h1>
   </header>
 
-  <div class="controls">
-    <div class="filter-row">
-      <div class="filter-group">
-        <label for="startDate">Start Date</label>
-        <input type="month" id="startDate">
-      </div>
-      <div class="filter-group">
-        <label for="endDate">End Date</label>
-        <input type="month" id="endDate">
-      </div>
-      <div class="filter-group">
-        <label for="referralType">Referral Type</label>
-        <div class="filter-with-toggle">
-          <button type="button" class="is-not-toggle" id="referralTypeMode" data-mode="is">is</button>
-          <select id="referralType"><option value="">All</option></select>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label for="referralCategory">Referral Category</label>
-        <div class="filter-with-toggle">
-          <button type="button" class="is-not-toggle" id="referralCategoryMode" data-mode="is">is</button>
-          <select id="referralCategory"><option value="">All</option></select>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label for="referringOrg">Referring Organization</label>
-        <div class="filter-with-toggle">
-          <button type="button" class="is-not-toggle" id="referringOrgMode" data-mode="is">is</button>
-          <select id="referringOrg"><option value="">All</option></select>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label for="hasReferringFriend">
-          <input type="checkbox" id="hasReferringFriend">
-          Has Referring Friend
-        </label>
-      </div>
-      <div class="filter-group">
-        <label for="coachId">Coach</label>
-        <div class="filter-with-toggle">
-          <button type="button" class="is-not-toggle" id="coachIdMode" data-mode="is">is</button>
-          <select id="coachId"><option value="">All</option></select>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label for="minMeetings">Min Meetings</label>
-        <input type="number" id="minMeetings" min="0" placeholder="0">
-      </div>
-      <div class="filter-group">
-        <label for="graduatedMode">Graduated Students</label>
-        <select id="graduatedMode">
-          <option value="active">Count as retained</option>
-          <option value="inactive">Count as inactive</option>
-          <option value="exclude">Exclude from report</option>
-        </select>
-      </div>
-      <button id="applyBtn" class="btn-primary">Apply Filters</button>
-    </div>
-
-    <div class="compare-toggle">
-      <label>
-        <input type="checkbox" id="compareMode">
-        Enable Comparison Mode
-      </label>
-    </div>
-
-    <div id="compareFilters" class="filter-row" style="display:none;">
-      <span class="compare-label">Compare with:</span>
-      <div class="filter-group">
-        <label for="referralType_b">Referral Type</label>
-        <div class="filter-with-toggle">
-          <button type="button" class="is-not-toggle" id="referralTypeMode_b" data-mode="is">is</button>
-          <select id="referralType_b"><option value="">All</option></select>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label for="referralCategory_b">Referral Category</label>
-        <div class="filter-with-toggle">
-          <button type="button" class="is-not-toggle" id="referralCategoryMode_b" data-mode="is">is</button>
-          <select id="referralCategory_b"><option value="">All</option></select>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label for="referringOrg_b">Referring Org</label>
-        <div class="filter-with-toggle">
-          <button type="button" class="is-not-toggle" id="referringOrgMode_b" data-mode="is">is</button>
-          <select id="referringOrg_b"><option value="">All</option></select>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label for="hasReferringFriend_b">
-          <input type="checkbox" id="hasReferringFriend_b">
-          Has Referring Friend
-        </label>
-      </div>
-      <div class="filter-group">
-        <label for="coachId_b">Coach</label>
-        <div class="filter-with-toggle">
-          <button type="button" class="is-not-toggle" id="coachIdMode_b" data-mode="is">is</button>
-          <select id="coachId_b"><option value="">All</option></select>
-        </div>
-      </div>
-      <div class="filter-group">
-        <label for="minMeetings_b">Min Meetings</label>
-        <input type="number" id="minMeetings_b" min="0" placeholder="0">
-      </div>
-      <div class="filter-group">
-        <label for="graduatedMode_b">Graduated Students</label>
-        <select id="graduatedMode_b">
-          <option value="active">Count as retained</option>
-          <option value="inactive">Count as inactive</option>
-          <option value="exclude">Exclude from report</option>
-        </select>
-      </div>
-    </div>
+  <div class="fy-controls">
+    <label for="fySelect">Fiscal Year:</label>
+    <select id="fySelect">
+      <option value="FY26" selected>FY26 (Current)</option>
+      <option value="FY25">FY25</option>
+      <option value="both">Both (Side by Side)</option>
+    </select>
+    <span class="fy-note">FY runs Sep 1 &ndash; Aug 31</span>
   </div>
 
-  <div class="controls breakdown-controls">
-    <div class="filter-row">
-      <div class="filter-group">
-        <label for="breakdownBy">Breakdown by</label>
-        <select id="breakdownBy">
-          <option value="">None</option>
-          <option value="coach">Coach</option>
-          <option value="org">Referring Organization</option>
-          <option value="referralType">Referral Type</option>
-          <option value="referralCategory">Referral Category</option>
-        </select>
-      </div>
-      <div class="filter-group breakdown-select-group" id="breakdownSelectGroup" style="display:none;">
-        <label>Select items to compare</label>
-        <div class="breakdown-picker">
-          <input type="text" id="breakdownSearch" placeholder="Search..." class="breakdown-search">
-          <div id="breakdownOptions" class="breakdown-options"></div>
-        </div>
-      </div>
-      <button id="breakdownBtn" class="btn-primary" style="display:none;">Show Breakdown</button>
-    </div>
+  <div class="design-toggle">
+    <button class="design-btn active" data-design="cards">KPI Cards</button>
+    <button class="design-btn" data-design="table">Table View</button>
   </div>
 
-  <div id="breakdownChartPanel" class="chart-panel" style="display:none;">
-    <h2>Retention Breakdown</h2>
-    <canvas id="breakdownChart"></canvas>
-  </div>
+  <div id="cards-view"></div>
+  <div id="table-view" style="display:none;"></div>
 
-  <div id="loading" class="loading" style="display:none;">Loading data from Salesforce...</div>
+  <footer class="exec-footer">
+    <p>Data sourced live from Salesforce.</p>
+  </footer>
 
-  <div id="chartPanel" class="chart-panel" style="display:none;">
-    <h2>Average Retention Curve</h2>
-    <canvas id="retentionChart"></canvas>
-  </div>
-
-  <div id="dashboardContainer">
-    <div id="tableA" class="table-panel">
-      <div class="panel-header">
-        <h2 id="labelA">All Students</h2>
-        <span id="countA" class="student-count"></span>
-      </div>
-      <div id="heatmapA" class="heatmap-wrapper"></div>
-    </div>
-    <div id="tableB" class="table-panel" style="display:none;">
-      <div class="panel-header">
-        <h2 id="labelB">Comparison</h2>
-        <span id="countB" class="student-count"></span>
-      </div>
-      <div id="heatmapB" class="heatmap-wrapper"></div>
-    </div>
-  </div>
-
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
-  <script src="app.js"></script>
+  <script src="executive.js"></script>
 </body>
 </html>

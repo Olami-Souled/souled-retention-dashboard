@@ -28,6 +28,17 @@ function pctCellClass(current, previous) {
   return current >= previous ? 'pos' : 'neg';
 }
 
+// Calculate what % of the current FY has elapsed (FY runs Sep 1 - Aug 31)
+function getFYElapsedPct(fy) {
+  const fyYear = parseInt(fy.replace('FY', '')) + 2000;
+  const fyStart = new Date(fyYear - 1, 8, 1); // Sep 1 of previous year
+  const fyEnd = new Date(fyYear, 7, 31);       // Aug 31
+  const now = new Date();
+  if (now >= fyEnd) return 1;
+  if (now <= fyStart) return 0;
+  return (now - fyStart) / (fyEnd - fyStart);
+}
+
 function buildCardsView(data, compareData, sideBySide) {
   const container = document.getElementById('cards-view');
 
@@ -36,16 +47,26 @@ function buildCardsView(data, compareData, sideBySide) {
     return;
   }
 
-  const prevLabel = compareData ? `vs ${compareData.fy}` : '';
+  const prevLabel = compareData ? `vs ${compareData.fy} final` : '';
+  const fyElapsed = getFYElapsedPct(data.fy || 'FY26');
+  const paceLabel = compareData ? `vs ${compareData.fy} pace` : '';
 
   function card(label, value, prevValue, opts = {}) {
     const cls = opts.small ? 'kpi-card small' : 'kpi-card';
     const highlight = opts.highlight ? ' highlight' : '';
     let changeHtml = '';
     if (prevValue !== undefined && prevValue !== null && value !== null) {
+      // Full-year comparison
       const pct = pctChange(value, prevValue);
       const pcl = pctClass(value, prevValue);
       if (pct) changeHtml = `<div class="kpi-change ${pcl}">${pct} ${prevLabel}</div>`;
+      // Prorated pace comparison (what prev FY would have been at this point)
+      if (fyElapsed > 0 && fyElapsed < 1) {
+        const prorated = Math.round(prevValue * fyElapsed);
+        const pacePct = pctChange(value, prorated);
+        const paceCl = pctClass(value, prorated);
+        if (pacePct) changeHtml += `<div class="kpi-change ${paceCl}">${pacePct} ${paceLabel} (${fmt(prorated)})</div>`;
+      }
     }
     return `<div class="${cls}${highlight}">
       <div class="kpi-label">${label}</div>
@@ -301,15 +322,28 @@ function buildTableView(data, compareData) {
   const at = data.allTime;
 
   const prevFy = compareData?.fy || 'Previous';
+  const fyElapsed = getFYElapsedPct(data.fy || 'FY26');
+  const showPace = fyElapsed > 0 && fyElapsed < 1 && compareData;
+  const pctLabel = Math.round(fyElapsed * 100);
+  const colSpan = showPace ? 6 : 4;
 
   function row(label, val, prevVal, opts = {}) {
     const cls = opts.highlight ? ' class="highlight-row"' : '';
     const pct = pctChange(val, prevVal);
     const pcl = pctCellClass(val, prevVal);
-    return `<tr${cls}><td>${label}</td><td>${fmt(val)}</td><td>${fmt(prevVal)}</td><td class="${pcl}">${pct}</td></tr>`;
+    let paceCells = '';
+    if (showPace && prevVal) {
+      const prorated = Math.round(prevVal * fyElapsed);
+      const pacePct = pctChange(val, prorated);
+      const paceCl = pctCellClass(val, prorated);
+      paceCells = `<td>${fmt(prorated)}</td><td class="${paceCl}">${pacePct}</td>`;
+    } else if (showPace) {
+      paceCells = '<td></td><td></td>';
+    }
+    return `<tr${cls}><td>${label}</td><td>${fmt(val)}</td><td>${fmt(prevVal)}</td><td class="${pcl}">${pct}</td>${paceCells}</tr>`;
   }
   function section(title, cls) {
-    return `<tr class="section-header${cls ? ' ' + cls : ''}"><td colspan="4">${title}</td></tr>`;
+    return `<tr class="section-header${cls ? ' ' + cls : ''}"><td colspan="${colSpan}">${title}</td></tr>`;
   }
 
   container.innerHTML = `
@@ -318,8 +352,9 @@ function buildTableView(data, compareData) {
         <thead><tr>
           <th>Metric</th>
           <th>${data.fy} (Current)</th>
-          <th>${prevFy}</th>
-          <th>% Change</th>
+          <th>${prevFy} Final</th>
+          <th>vs Final</th>
+          ${showPace ? `<th>${prevFy} Pace (${pctLabel}%)</th><th>vs Pace</th>` : ''}
         </tr></thead>
         <tbody>
           ${section('Coaching Activity')}

@@ -213,12 +213,8 @@
   font-weight: 600;
 }
 
-.exec-table td:nth-child(2),
-.exec-table td:nth-child(3),
-.exec-table td:nth-child(4),
-.exec-table th:nth-child(2),
-.exec-table th:nth-child(3),
-.exec-table th:nth-child(4) {
+.exec-table td:nth-child(n+2),
+.exec-table th:nth-child(n+2) {
   text-align: right;
 }
 

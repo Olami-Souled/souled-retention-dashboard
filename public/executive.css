@@ -232,6 +232,89 @@
   font-weight: 600;
 }
 
+/* --- Side-by-Side Dual Cards --- */
+.kpi-grid-dual {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.kpi-card-dual {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  border-left: 4px solid #0984e3;
+}
+
+.kpi-card-dual.small {
+  padding: 12px;
+}
+
+.kpi-card-dual.highlight {
+  border-left-color: #00b894;
+  background: #f0fff4;
+}
+
+.kpi-card-dual .kpi-label {
+  font-size: 0.8rem;
+  color: #636e72;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.dual-values {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.dual-col {
+  flex: 1;
+}
+
+.dual-fy-label {
+  font-size: 0.65rem;
+  color: #b2bec3;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+
+.dual-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #2d3436;
+}
+
+.kpi-card-dual.small .dual-value {
+  font-size: 1.15rem;
+}
+
+.dual-value.prev {
+  color: #636e72;
+}
+
+.dual-change {
+  font-size: 0.75rem;
+  font-weight: 600;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.dual-change.positive {
+  color: #00b894;
+}
+
+.dual-change.negative {
+  color: #d63031;
+}
+
+.kpi-section.alltime .kpi-card-dual {
+  border-left-color: #6c5ce7;
+}
+
 /* --- Footer --- */
 .exec-footer {
   margin-top: 24px;

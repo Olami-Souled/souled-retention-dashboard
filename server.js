@@ -1005,39 +1005,58 @@ async function computeClassesAndEvents(conn, testIds, fyDates) {
     shabbatonAttendances: 0, shabbatonAttendees: 0
   };
 
-  // Video and Zoom classes from Class_Attendance__c
-  // Report filter logic: 1 AND 2 AND 3 AND (4 OR 5)
-  // Duration >= 2 min (live) OR Watched_Recording >= 10% (recorded)
+  // Video classes from Class_Attendance__c (RecordType = On Demand Class or Library Item)
+  // Report: 1 AND 2 AND 3 AND (4 OR 5) AND 6
+  // 1=Souled, 2=!Test, 3=Student RT, 4=Duration>=2, 5=Watched>=10%, 6=RT filter
   try {
-    const attendances = await queryAll(conn,
-      `SELECT Student__c, Course_Occurrence_Type__c
+    const videoAttendances = await queryAll(conn,
+      `SELECT Student__c
        FROM Class_Attendance__c
        WHERE Student__r.Is_Registered_for_Souled__c = 1
        AND Student__r.Test_Old__c = false
+       AND Student__r.RecordType.Name = 'Student'
        AND CreatedDate >= ${fyDates.start}T00:00:00Z
        AND CreatedDate <= ${fyDates.end}T23:59:59Z
-       AND (Duration_in_Minutes__c >= 2 OR Watched_Recording__c >= 10)`
+       AND (Duration_in_Minutes__c >= 2 OR Watched_Recording__c >= 10)
+       AND (RecordType.Name = 'On Demand Class' OR RecordType.Name = 'Library Item')`
     );
     const videoStudents = new Set();
-    const zoomStudents = new Set();
-    let videoWatched = 0, zoomAttendances = 0;
-
-    for (const r of attendances) {
+    let videoWatched = 0;
+    for (const r of videoAttendances) {
       if (testIds.has(r.Student__c)) continue;
-      if (r.Course_Occurrence_Type__c === 'On_Demand') {
-        videoWatched++;
-        videoStudents.add(r.Student__c);
-      } else if (r.Course_Occurrence_Type__c === 'Live') {
-        zoomAttendances++;
-        zoomStudents.add(r.Student__c);
-      }
+      videoWatched++;
+      videoStudents.add(r.Student__c);
     }
     result.videoClassesWatched = videoWatched;
     result.videoClassWatchers = videoStudents.size;
+  } catch (e) {
+    console.error('Video class attendance query error:', e.message);
+  }
+
+  // Live Zoom classes from Class_Attendance__c (RecordType = Live Class)
+  try {
+    const liveAttendances = await queryAll(conn,
+      `SELECT Student__c
+       FROM Class_Attendance__c
+       WHERE Student__r.Is_Registered_for_Souled__c = 1
+       AND Student__r.Test_Old__c = false
+       AND Student__r.RecordType.Name = 'Student'
+       AND CreatedDate >= ${fyDates.start}T00:00:00Z
+       AND CreatedDate <= ${fyDates.end}T23:59:59Z
+       AND (Duration_in_Minutes__c >= 2 OR Watched_Recording__c >= 10)
+       AND RecordType.Name = 'Live Class'`
+    );
+    const zoomStudents = new Set();
+    let zoomAttendances = 0;
+    for (const r of liveAttendances) {
+      if (testIds.has(r.Student__c)) continue;
+      zoomAttendances++;
+      zoomStudents.add(r.Student__c);
+    }
     result.liveZoomAttendances = zoomAttendances;
     result.liveZoomAttendees = zoomStudents.size;
   } catch (e) {
-    console.error('Class attendance query error:', e.message);
+    console.error('Live class attendance query error:', e.message);
   }
 
   // Coach-Led Courses (CLCs) from Contact_Coach_Course_Engagement__c

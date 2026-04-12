@@ -28,8 +28,14 @@ function pctCellClass(current, previous) {
   return current >= previous ? 'pos' : 'neg';
 }
 
-function buildCardsView(data, compareData) {
+function buildCardsView(data, compareData, sideBySide) {
   const container = document.getElementById('cards-view');
+
+  if (sideBySide && compareData) {
+    buildSideBySideCards(container, data, compareData);
+    return;
+  }
+
   const prevLabel = compareData ? `vs ${compareData.fy}` : '';
 
   function card(label, value, prevValue, opts = {}) {
@@ -149,6 +155,134 @@ function buildCardsView(data, compareData) {
         ${card('Students Registered for Souled', at.registeredForSouled)}
         ${card('Students Who Met with a Coach', at.metWithCoach)}
         ${card('Met with Coach 3+ Times', at.metWithCoach3Plus)}
+      </div>
+    </section>
+  `;
+}
+
+function buildSideBySideCards(container, data, compareData) {
+  const fyA = data.fy || 'FY26';
+  const fyB = compareData.fy || 'FY25';
+
+  function dualCard(label, valA, valB, opts = {}) {
+    const cls = opts.small ? 'kpi-card-dual small' : 'kpi-card-dual';
+    const highlight = opts.highlight ? ' highlight' : '';
+    const pct = pctChange(valA, valB);
+    const pcl = pctClass(valA, valB);
+    const changeHtml = pct ? `<div class="dual-change ${pcl}">${pct}</div>` : '';
+    return `<div class="${cls}${highlight}">
+      <div class="kpi-label">${label}</div>
+      <div class="dual-values">
+        <div class="dual-col">
+          <div class="dual-fy-label">${fyA}</div>
+          <div class="dual-value">${fmt(valA)}</div>
+        </div>
+        <div class="dual-col">
+          <div class="dual-fy-label">${fyB}</div>
+          <div class="dual-value prev">${fmt(valB)}</div>
+        </div>
+        ${changeHtml}
+      </div>
+    </div>`;
+  }
+
+  const c = data.coaching, pc = compareData.coaching;
+  const sg = data.spiritualGrowth, psg = compareData.spiritualGrowth;
+  const g = data.graduation, pg = compareData.graduation;
+  const ev = data.events, pev = compareData.events;
+  const at = data.allTime;
+
+  container.innerHTML = `
+    <section class="kpi-section">
+      <h2 class="section-title">Coaching Activity</h2>
+      <div class="kpi-grid-dual">
+        ${dualCard('Students who met with a coach', c.studentsMetCoach, pc.studentsMetCoach)}
+        ${dualCard('One on Ones', c.totalOneOnOnes, pc.totalOneOnOnes)}
+        ${dualCard('Avg Weekly One on Ones', c.avgWeeklyOneOnOnes, pc.avgWeeklyOneOnOnes)}
+      </div>
+    </section>
+
+    <section class="kpi-section">
+      <h2 class="section-title">One-on-One Buckets</h2>
+      <div class="kpi-grid-dual">
+        ${dualCard('1-3 meetings', c.tpBuckets['1-3'], pc.tpBuckets?.['1-3'], {small: true})}
+        ${dualCard('4-6 meetings', c.tpBuckets['4-6'], pc.tpBuckets?.['4-6'], {small: true})}
+        ${dualCard('7-9 meetings', c.tpBuckets['7-9'], pc.tpBuckets?.['7-9'], {small: true})}
+        ${dualCard('10+ meetings', c.tpBuckets['10+'], pc.tpBuckets?.['10+'], {small: true})}
+        ${dualCard('7+ Continuous', c.tpContinuous, pc.tpContinuous, {small: true, highlight: true})}
+      </div>
+    </section>
+
+    <section class="kpi-section">
+      <h2 class="section-title">Interaction Buckets</h2>
+      <div class="kpi-grid-dual">
+        ${dualCard('1-3 interactions', c.intBuckets['1-3'], pc.intBuckets?.['1-3'], {small: true})}
+        ${dualCard('4-6 interactions', c.intBuckets['4-6'], pc.intBuckets?.['4-6'], {small: true})}
+        ${dualCard('7-9 interactions', c.intBuckets['7-9'], pc.intBuckets?.['7-9'], {small: true})}
+        ${dualCard('10+ interactions', c.intBuckets['10+'], pc.intBuckets?.['10+'], {small: true})}
+        ${dualCard('7+ Continuous', c.intContinuous, pc.intContinuous, {small: true, highlight: true})}
+      </div>
+    </section>
+
+    <section class="kpi-section">
+      <h2 class="section-title">Trips &amp; Seminary</h2>
+      <div class="kpi-grid-dual">
+        ${dualCard('L2 Trip Participants', data.l2Trips.participants, compareData.l2Trips?.participants)}
+        ${dualCard('Seminary Placements', data.seminary.placements, compareData.seminary?.placements)}
+      </div>
+    </section>
+
+    <section class="kpi-section">
+      <h2 class="section-title">Spiritual Growth</h2>
+      <div class="kpi-grid-dual">
+        ${dualCard('Became SO (Shabbat Observant)', sg.so, psg.so)}
+        ${dualCard('Became STAM (Fully Observant)', sg.stam, psg.stam)}
+        ${dualCard('Unique SO/STAM', sg.uniqueSOSTAM, psg.uniqueSOSTAM, {highlight: true})}
+      </div>
+    </section>
+
+    <section class="kpi-section">
+      <h2 class="section-title">Step Forward Commitments</h2>
+      <div class="kpi-grid-dual">
+        ${dualCard('Became Shomer Kashrus', sg.kashrus, psg.kashrus, {small: true})}
+        ${dualCard('Became Shomer Tznius', sg.tznius, psg.tznius, {small: true})}
+        ${dualCard('Committed to Marry Jewish', sg.marryJewish, psg.marryJewish, {small: true})}
+      </div>
+    </section>
+
+    <section class="kpi-section">
+      <h2 class="section-title">Graduation Paths</h2>
+      <div class="kpi-grid-dual">
+        ${dualCard('Graduated to In Person Learning', g.inPersonLearning, pg.inPersonLearning, {small: true})}
+        ${dualCard('Graduated to Long Term Seminary', g.longTermSeminary, pg.longTermSeminary, {small: true})}
+        ${dualCard('Graduated to Orthodox Conversion', g.orthodoxConversion, pg.orthodoxConversion, {small: true})}
+      </div>
+    </section>
+
+    <section class="kpi-section">
+      <h2 class="section-title">Classes &amp; Events</h2>
+      <div class="kpi-grid-dual">
+        ${dualCard('Video Classes Watched', ev.videoClassesWatched, pev.videoClassesWatched, {small: true})}
+        ${dualCard('Video Class Watchers', ev.videoClassWatchers, pev.videoClassWatchers, {small: true})}
+        ${dualCard('Live Zoom Attendances', ev.liveZoomAttendances, pev.liveZoomAttendances, {small: true})}
+        ${dualCard('Live Zoom Attendees', ev.liveZoomAttendees, pev.liveZoomAttendees, {small: true})}
+        ${dualCard('Coach-Led Courses', ev.coachLedCourses, pev.coachLedCourses, {small: true})}
+        ${dualCard('CLC Students', ev.clcStudents, pev.clcStudents, {small: true})}
+        ${dualCard('Experiences by Coaches', ev.experiencesByCoaches, pev.experiencesByCoaches, {small: true})}
+        ${dualCard('Students at Experiences', ev.studentsAtExperiences, pev.studentsAtExperiences, {small: true})}
+        ${dualCard('Weekday Event Attendances', ev.weekdayEventAttendances, pev.weekdayEventAttendances, {small: true})}
+        ${dualCard('Weekday Event Attendees', ev.weekdayEventAttendees, pev.weekdayEventAttendees, {small: true})}
+        ${dualCard('Shabbaton Attendances', ev.shabbatonAttendances, pev.shabbatonAttendances, {small: true})}
+        ${dualCard('Shabbaton Attendees', ev.shabbatonAttendees, pev.shabbatonAttendees, {small: true})}
+      </div>
+    </section>
+
+    <section class="kpi-section alltime">
+      <h2 class="section-title">All Time Numbers</h2>
+      <div class="kpi-grid-dual">
+        ${dualCard('Students Registered for Souled', at.registeredForSouled, null)}
+        ${dualCard('Students Who Met with a Coach', at.metWithCoach, null)}
+        ${dualCard('Met with Coach 3+ Times', at.metWithCoach3Plus, null)}
       </div>
     </section>
   `;
@@ -291,7 +425,8 @@ async function loadData() {
       }
     }
 
-    buildCardsView(currentData, compareData);
+    const isBoth = fy === 'both';
+    buildCardsView(currentData, compareData, isBoth);
     buildTableView(currentData, compareData);
   } catch (err) {
     showError(err.message);

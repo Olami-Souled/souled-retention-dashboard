@@ -468,6 +468,113 @@ async function loadData() {
   }
 }
 
+async function downloadExcel() {
+  const btn = document.getElementById('downloadBtn');
+  btn.disabled = true;
+  btn.textContent = 'Downloading...';
+
+  try {
+    const [fy26, fy25] = await Promise.all([
+      fetchExecutiveData('FY26'),
+      fetchExecutiveData('FY25')
+    ]);
+
+    const rows = [
+      ['Souled Executive Report', '', '', ''],
+      ['Generated', new Date().toLocaleDateString(), '', ''],
+      [],
+      ['Metric', 'FY26', 'FY25', '% Change'],
+      [],
+      ['COACHING ACTIVITY'],
+      ['Students who met with a coach', fy26.coaching.studentsMetCoach, fy25.coaching.studentsMetCoach],
+      ['One on Ones', fy26.coaching.totalOneOnOnes, fy25.coaching.totalOneOnOnes],
+      ['Avg Weekly One on Ones', fy26.coaching.avgWeeklyOneOnOnes, fy25.coaching.avgWeeklyOneOnOnes],
+      [],
+      ['ONE-ON-ONE BUCKETS'],
+      ['Students had 1-3', fy26.coaching.tpBuckets['1-3'], fy25.coaching.tpBuckets['1-3']],
+      ['Students had 4-6', fy26.coaching.tpBuckets['4-6'], fy25.coaching.tpBuckets['4-6']],
+      ['Students had 7-9', fy26.coaching.tpBuckets['7-9'], fy25.coaching.tpBuckets['7-9']],
+      ['Students had 10+', fy26.coaching.tpBuckets['10+'], fy25.coaching.tpBuckets['10+']],
+      ['7+ Continuous', fy26.coaching.tpContinuous, fy25.coaching.tpContinuous],
+      [],
+      ['INTERACTION BUCKETS'],
+      ['Students had 1-3', fy26.coaching.intBuckets['1-3'], fy25.coaching.intBuckets['1-3']],
+      ['Students had 4-6', fy26.coaching.intBuckets['4-6'], fy25.coaching.intBuckets['4-6']],
+      ['Students had 7-9', fy26.coaching.intBuckets['7-9'], fy25.coaching.intBuckets['7-9']],
+      ['Students had 10+', fy26.coaching.intBuckets['10+'], fy25.coaching.intBuckets['10+']],
+      ['7+ Continuous', fy26.coaching.intContinuous, fy25.coaching.intContinuous],
+      [],
+      ['TRIPS & SEMINARY'],
+      ['L2 Trip Participants', fy26.l2Trips.participants, fy25.l2Trips.participants],
+      ['Seminary Placements', fy26.seminary.placements, fy25.seminary.placements],
+      [],
+      ['SPIRITUAL GROWTH'],
+      ['Became SO (Shabbat Observant)', fy26.spiritualGrowth.so, fy25.spiritualGrowth.so],
+      ['Became STAM (Fully Observant)', fy26.spiritualGrowth.stam, fy25.spiritualGrowth.stam],
+      ['Unique SO/STAM', fy26.spiritualGrowth.uniqueSOSTAM, fy25.spiritualGrowth.uniqueSOSTAM],
+      [],
+      ['STEP FORWARD COMMITMENTS'],
+      ['Became Shomer Kashrus', fy26.spiritualGrowth.kashrus, fy25.spiritualGrowth.kashrus],
+      ['Became Shomer Tznius', fy26.spiritualGrowth.tznius, fy25.spiritualGrowth.tznius],
+      ['Committed to Marry Jewish', fy26.spiritualGrowth.marryJewish, fy25.spiritualGrowth.marryJewish],
+      [],
+      ['GRADUATION PATHS'],
+      ['Graduated to In Person Learning', fy26.graduation.inPersonLearning, fy25.graduation.inPersonLearning],
+      ['Graduated to Long Term Seminary', fy26.graduation.longTermSeminary, fy25.graduation.longTermSeminary],
+      ['Graduated to Orthodox Conversion', fy26.graduation.orthodoxConversion, fy25.graduation.orthodoxConversion],
+      [],
+      ['CLASSES & EVENTS'],
+      ['Video Classes Watched', fy26.events.videoClassesWatched, fy25.events.videoClassesWatched],
+      ['Video Class Watchers', fy26.events.videoClassWatchers, fy25.events.videoClassWatchers],
+      ['Live Zoom Attendances', fy26.events.liveZoomAttendances, fy25.events.liveZoomAttendances],
+      ['Live Zoom Attendees', fy26.events.liveZoomAttendees, fy25.events.liveZoomAttendees],
+      ['Coach-Led Courses', fy26.events.coachLedCourses, fy25.events.coachLedCourses],
+      ['CLC Students', fy26.events.clcStudents, fy25.events.clcStudents],
+      ['Experiences by Coaches', fy26.events.experiencesByCoaches, fy25.events.experiencesByCoaches],
+      ['Students at Experiences', fy26.events.studentsAtExperiences, fy25.events.studentsAtExperiences],
+      ['Weekday Event Attendances', fy26.events.weekdayEventAttendances, fy25.events.weekdayEventAttendances],
+      ['Weekday Event Attendees', fy26.events.weekdayEventAttendees, fy25.events.weekdayEventAttendees],
+      ['Shabbaton Attendances', fy26.events.shabbatonAttendances, fy25.events.shabbatonAttendances],
+      ['Shabbaton Attendees', fy26.events.shabbatonAttendees, fy25.events.shabbatonAttendees],
+      [],
+      ['ALL TIME NUMBERS'],
+      ['Students Registered for Souled', fy26.allTime.registeredForSouled],
+      ['Students Who Met with a Coach', fy26.allTime.metWithCoach],
+      ['Met with Coach 3+ Times', fy26.allTime.metWithCoach3Plus],
+    ];
+
+    // Add % change formulas for data rows
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (r.length >= 3 && typeof r[1] === 'number' && typeof r[2] === 'number' && r[2] !== 0) {
+        r[3] = (r[1] - r[2]) / r[2];
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+
+    // Column widths
+    ws['!cols'] = [{ wch: 35 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+
+    // Format % change column as percentage
+    for (let i = 0; i < rows.length; i++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: i, c: 3 })];
+      if (cell && typeof cell.v === 'number') {
+        cell.z = '0%';
+      }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Executive Report');
+    XLSX.writeFile(wb, `Souled_Executive_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  } catch (err) {
+    alert('Download failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download Excel';
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // Design toggle
   document.querySelectorAll('.design-btn').forEach(btn => {
@@ -479,6 +586,9 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('table-view').style.display = design === 'table' ? 'block' : 'none';
     });
   });
+
+  // Download button
+  document.getElementById('downloadBtn').addEventListener('click', downloadExcel);
 
   // FY selector
   document.getElementById('fySelect').addEventListener('change', loadData);

@@ -56,11 +56,42 @@
   font-size: 0.8rem;
 }
 
+/* --- Toolbar --- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.download-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #00b894;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.download-btn:hover {
+  background: #00a381;
+}
+
+.download-btn:disabled {
+  background: #b2bec3;
+  cursor: not-allowed;
+}
+
 /* --- Design Toggle --- */
 .design-toggle {
   display: flex;
   gap: 0;
-  margin-bottom: 20px;
   background: #dfe6e9;
   border-radius: 6px;
   overflow: hidden;

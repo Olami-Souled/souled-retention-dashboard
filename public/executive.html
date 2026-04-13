@@ -30,9 +30,15 @@
     <span class="fy-note">FY runs Sep 1 &ndash; Aug 31</span>
   </div>
 
-  <div class="design-toggle">
-    <button class="design-btn active" data-design="cards">KPI Cards</button>
-    <button class="design-btn" data-design="table">Table View</button>
+  <div class="toolbar">
+    <div class="design-toggle">
+      <button class="design-btn active" data-design="cards">KPI Cards</button>
+      <button class="design-btn" data-design="table">Table View</button>
+    </div>
+    <button id="downloadBtn" class="download-btn" title="Download Excel with FY25 & FY26 data">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Download Excel
+    </button>
   </div>
 
   <div id="cards-view"></div>
@@ -42,6 +48,7 @@
     <p>Data sourced live from Salesforce.</p>
   </footer>
 
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <script src="executive.js"></script>
 </body>
 </html>

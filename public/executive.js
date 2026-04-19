@@ -578,7 +578,7 @@ async function downloadExcel() {
 // --- Number of Souled Students chart ---
 let studentsChart = null;
 let studentsGranularity = 'weekly';
-let includeBufferInCapacity = false; // when false (default), Current Capacity is shown reduced by per-day buffer
+let includeBufferInCapacity = true; // default: show raw Current Capacity (incl. buffer). Uncheck to show effective (capacity − buffer).
 const enabledOverlays = new Set();
 
 const OVERLAY_STYLE = {
@@ -656,7 +656,7 @@ async function loadStudentsChart() {
         if (key === 'currentCapacity') {
           displayLabel = includeBufferInCapacity
             ? 'Current Capacity (incl. ~40-spot buffer)'
-            : 'Current Capacity (after ~40-spot buffer)';
+            : 'Current Capacity (excl. ~40-spot buffer)';
         }
 
         datasets.push({
@@ -722,7 +722,7 @@ async function loadStudentsChart() {
                 const cv = capItem.parsed.y;
                 if (sv === null || cv === null || sv === undefined || cv === undefined) return undefined;
                 const avail = Math.round(cv - sv);
-                const suffix = includeBufferInCapacity ? ' (incl. ~40 buffer)' : ' (above ~40 buffer)';
+                const suffix = includeBufferInCapacity ? ' (incl. ~40 buffer)' : ' (excl. ~40 buffer)';
                 return `Available spots: ${avail.toLocaleString()}${suffix}`;
               }
             }

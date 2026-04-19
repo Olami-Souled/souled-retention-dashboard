@@ -752,6 +752,7 @@ app.get('/api/student-overlays', async (req, res) => {
 
     const wantsCapacity = include.includes('capacity') || include.includes('currentCapacity');
     const wantsCPL = include.includes('cpl');
+    const wantsRegs = include.includes('registrations');
 
     const conn = await getSfConnection();
     const testIds = await getTestContactIds(conn);
@@ -854,25 +855,52 @@ app.get('/api/student-overlays', async (req, res) => {
       }
     }
 
-    // ----- Real CPL: Meta spend / new Souled registrations -----
-    if (wantsCPL) {
-      const spendByDay = getMetaSpendByDay();
-
-      // New Souled registrations per day, excluding test students
+    // ----- Registrations + Real CPL share the same SF query -----
+    let regsByDay = null;
+    if (wantsCPL || wantsRegs) {
       const regs = await queryAll(conn,
         `SELECT Id, Student__c, CreatedDate FROM Registration__c
          WHERE Program__c = '${SOULED_PROGRAM_ID}'
          AND CreatedDate >= ${startDate}T00:00:00Z
          AND CreatedDate <= ${endDate}T23:59:59Z`
       );
-      const regsByDay = new Map();
+      regsByDay = new Map();
       for (const r of regs) {
         if (testIds.has(r.Student__c)) continue;
         const day = new Date(r.CreatedDate).toISOString().slice(0, 10);
         regsByDay.set(day, (regsByDay.get(day) || 0) + 1);
       }
+    }
 
+    if (wantsCPL) {
+      const spendByDay = getMetaSpendByDay();
       out.series.cpl = aggregateBucketsRatio(spendByDay, regsByDay, startDate, endDate, granularity);
+    }
+
+    if (wantsRegs) {
+      // Bucket new-registration counts by the chosen granularity, summing within each bucket.
+      // Fill missing days with 0 so weekly/monthly totals are correct.
+      const startD = new Date(startDate + 'T00:00:00Z');
+      const endD = new Date(endDate + 'T00:00:00Z');
+      const buckets = new Map();
+      for (let d = new Date(startD); d <= endD; d.setUTCDate(d.getUTCDate() + 1)) {
+        const dayStr = d.toISOString().slice(0, 10);
+        let key;
+        if (granularity === 'daily') {
+          key = dayStr;
+        } else if (granularity === 'weekly') {
+          const sunday = new Date(d);
+          sunday.setUTCDate(d.getUTCDate() - d.getUTCDay());
+          key = sunday.toISOString().slice(0, 10);
+        } else {
+          key = dayStr.slice(0, 7) + '-01';
+        }
+        if (!buckets.has(key)) buckets.set(key, 0);
+        buckets.set(key, buckets.get(key) + (regsByDay.get(dayStr) || 0));
+      }
+      out.series.registrations = Array.from(buckets.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, value]) => ({ date, value }));
     }
 
     res.json(out);

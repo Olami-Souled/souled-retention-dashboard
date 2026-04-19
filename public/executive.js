@@ -577,13 +577,14 @@ async function downloadExcel() {
 
 // --- Number of Souled Students chart ---
 let studentsChart = null;
-let studentsGranularity = 'daily';
+let studentsGranularity = 'weekly';
 const enabledOverlays = new Set();
 
 const OVERLAY_STYLE = {
   capacity: { label: 'Total Capacity', color: '#00b894', dash: [6, 4], axis: 'y' },
   currentCapacity: { label: 'Current Capacity', color: '#fd7e14', dash: [], axis: 'y' },
-  cpl: { label: 'Real CPL ($)', color: '#d63031', dash: [], axis: 'y1' }
+  registrations: { label: 'New Registrations', color: '#6c5ce7', dash: [], axis: 'y1', unit: 'regs' },
+  cpl: { label: 'Real CPL ($)', color: '#d63031', dash: [], axis: 'y1', unit: 'usd' }
 };
 
 async function loadStudentsChart() {
@@ -628,7 +629,7 @@ async function loadStudentsChart() {
 
     if (overlaysPayload && overlaysPayload.series) {
       // Build a date→value map per overlay so we can align with the labels axis
-      for (const key of ['capacity', 'currentCapacity', 'cpl']) {
+      for (const key of ['capacity', 'currentCapacity', 'registrations', 'cpl']) {
         if (!enabledOverlays.has(key) || !overlaysPayload.series[key]) continue;
         const style = OVERLAY_STYLE[key];
         const byDate = new Map(overlaysPayload.series[key].map(p => [p.date, p.value]));
@@ -645,13 +646,19 @@ async function loadStudentsChart() {
           borderWidth: 2,
           yAxisID: style.axis,
           // For CPL specifically: gaps mean ads were paused (no spend) — show them
-          // as visible breaks. For capacity overlays: bridge minor gaps.
+          // as visible breaks. Other overlays bridge minor gaps.
           spanGaps: key !== 'cpl'
         });
       }
     }
 
-    const showRightAxis = enabledOverlays.has('cpl');
+    // Right axis is shown when ANY overlay uses it (registrations or CPL)
+    const showRightAxis = enabledOverlays.has('cpl') || enabledOverlays.has('registrations');
+    // If both use it, we still use a single y1 axis. CPL is in $; registrations is a count.
+    // When BOTH are on we label the axis generically; otherwise label by which one is on.
+    const rightAxisLabel = (enabledOverlays.has('cpl') && enabledOverlays.has('registrations'))
+      ? 'CPL ($) / Registrations'
+      : enabledOverlays.has('cpl') ? 'CPL ($)' : 'New Registrations';
 
     const ctx = document.getElementById('studentsChart').getContext('2d');
     if (studentsChart) studentsChart.destroy();
@@ -673,6 +680,9 @@ async function loadStudentsChart() {
                 if (item.dataset.label === 'Real CPL ($)') {
                   return ` ${item.dataset.label}: $${Number(v).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
                 }
+                if (item.dataset.label === 'New Registrations') {
+                  return ` ${item.dataset.label}: ${Number(v).toLocaleString()} this ${studentsGranularity === 'monthly' ? 'month' : studentsGranularity === 'weekly' ? 'week' : 'day'}`;
+                }
                 return ` ${item.dataset.label}: ${Number(v).toLocaleString()}`;
               }
             }
@@ -693,9 +703,16 @@ async function loadStudentsChart() {
             position: 'right',
             display: showRightAxis,
             beginAtZero: true,
-            title: { display: true, text: 'CPL ($)' },
+            title: { display: true, text: rightAxisLabel },
             grid: { drawOnChartArea: false },
-            ticks: { callback: v => '$' + Number(v).toLocaleString() }
+            ticks: {
+              callback: v => {
+                // If CPL is on (with or without registrations), prefix dollar sign;
+                // if only registrations, plain number.
+                if (enabledOverlays.has('cpl')) return '$' + Number(v).toLocaleString();
+                return Number(v).toLocaleString();
+              }
+            }
           }
         }
       }

@@ -677,13 +677,14 @@ async function loadStudentsChart() {
               label: item => {
                 const v = item.parsed.y;
                 if (v === null || v === undefined) return null;
+                const rounded = Math.round(Number(v));
                 if (item.dataset.label === 'Real CPL ($)') {
-                  return ` ${item.dataset.label}: $${Number(v).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+                  return ` ${item.dataset.label}: $${rounded.toLocaleString()}`;
                 }
                 if (item.dataset.label === 'New Registrations') {
-                  return ` ${item.dataset.label}: ${Number(v).toLocaleString()} this ${studentsGranularity === 'monthly' ? 'month' : studentsGranularity === 'weekly' ? 'week' : 'day'}`;
+                  return ` ${item.dataset.label}: ${rounded.toLocaleString()} this ${studentsGranularity === 'monthly' ? 'month' : studentsGranularity === 'weekly' ? 'week' : 'day'}`;
                 }
-                return ` ${item.dataset.label}: ${Number(v).toLocaleString()}`;
+                return ` ${item.dataset.label}: ${rounded.toLocaleString()}`;
               }
             }
           }

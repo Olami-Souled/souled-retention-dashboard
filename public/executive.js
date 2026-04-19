@@ -655,8 +655,8 @@ async function loadStudentsChart() {
         });
         if (key === 'currentCapacity') {
           displayLabel = includeBufferInCapacity
-            ? 'Current Capacity (incl. buffer)'
-            : 'Current Capacity (after buffer)';
+            ? 'Current Capacity (incl. ~40-spot buffer)'
+            : 'Current Capacity (after ~40-spot buffer)';
         }
 
         datasets.push({
@@ -722,7 +722,7 @@ async function loadStudentsChart() {
                 const cv = capItem.parsed.y;
                 if (sv === null || cv === null || sv === undefined || cv === undefined) return undefined;
                 const avail = Math.round(cv - sv);
-                const suffix = includeBufferInCapacity ? ' (incl. buffer)' : ' (above buffer)';
+                const suffix = includeBufferInCapacity ? ' (incl. ~40 buffer)' : ' (above ~40 buffer)';
                 return `Available spots: ${avail.toLocaleString()}${suffix}`;
               }
             }

@@ -342,6 +342,72 @@
   border-left-color: #6c5ce7;
 }
 
+/* --- Students View (Matched Students Chart) --- */
+.students-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-group label {
+  font-weight: 600;
+  color: #2d3436;
+  font-size: 0.9rem;
+}
+
+.control-group input[type="date"] {
+  padding: 6px 10px;
+  border: 1px solid #dfe6e9;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.granularity-toggle {
+  background: #dfe6e9;
+  border-radius: 6px;
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+}
+
+.gran-btn {
+  padding: 6px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #636e72;
+  transition: all 0.2s;
+}
+
+.gran-btn.active {
+  background: #0984e3;
+  color: #fff;
+}
+
+.chart-container {
+  background: #fff;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  height: 480px;
+  position: relative;
+}
+
 /* --- Footer --- */
 .exec-footer {
   margin-top: 24px;

@@ -575,16 +575,111 @@ async function downloadExcel() {
   }
 }
 
+// --- Number of Souled Students chart ---
+let studentsChart = null;
+let studentsGranularity = 'daily';
+
+async function loadStudentsChart() {
+  const startInput = document.getElementById('studentsStart');
+  const endInput = document.getElementById('studentsEnd');
+  const start = startInput.value;
+  const end = endInput.value;
+
+  try {
+    const res = await fetch(`/api/matched-students-history?start=${start}&end=${end}&granularity=${studentsGranularity}`);
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const payload = await res.json();
+
+    // Update KPI
+    document.getElementById('currentMatchedValue').textContent =
+      payload.currentValue !== null ? Number(payload.currentValue).toLocaleString() : '—';
+
+    // Tighten the start-input min to the earliest available date
+    if (payload.earliestAvailable) {
+      startInput.min = payload.earliestAvailable;
+    }
+
+    const labels = payload.data.map(p => p.date);
+    const values = payload.data.map(p => p.value);
+
+    const ctx = document.getElementById('studentsChart').getContext('2d');
+    if (studentsChart) studentsChart.destroy();
+    studentsChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Souled Students with a Coach',
+          data: values,
+          borderColor: '#0984e3',
+          backgroundColor: 'rgba(9, 132, 227, 0.1)',
+          fill: true,
+          tension: 0.25,
+          pointRadius: studentsGranularity === 'daily' ? 0 : 3,
+          pointHoverRadius: 5,
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: items => items[0].label,
+              label: item => ` ${Number(item.parsed.y).toLocaleString()} students`
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12 },
+            grid: { display: false }
+          },
+          y: {
+            beginAtZero: false,
+            ticks: { callback: v => Number(v).toLocaleString() }
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Failed to load students chart:', err);
+    document.getElementById('currentMatchedValue').textContent = 'Error';
+  }
+}
+
+function setActiveView(design) {
+  document.querySelectorAll('.design-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.design === design);
+  });
+  document.getElementById('cards-view').style.display = design === 'cards' ? 'block' : 'none';
+  document.getElementById('table-view').style.display = design === 'table' ? 'block' : 'none';
+  document.getElementById('students-view').style.display = design === 'students' ? 'block' : 'none';
+
+  // Toolbar items only relevant to FY views
+  document.getElementById('downloadBtn').style.display = design === 'students' ? 'none' : '';
+  document.querySelector('.fy-controls').style.display = design === 'students' ? 'none' : '';
+
+  if (design === 'students') {
+    // Lazy-init date inputs and load chart on first switch
+    const startInput = document.getElementById('studentsStart');
+    const endInput = document.getElementById('studentsEnd');
+    if (!startInput.value) {
+      startInput.value = '2025-09-01';
+      endInput.value = new Date().toISOString().slice(0, 10);
+      endInput.max = endInput.value;
+    }
+    loadStudentsChart();
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // Design toggle
   document.querySelectorAll('.design-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.design-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const design = btn.dataset.design;
-      document.getElementById('cards-view').style.display = design === 'cards' ? 'block' : 'none';
-      document.getElementById('table-view').style.display = design === 'table' ? 'block' : 'none';
-    });
+    btn.addEventListener('click', () => setActiveView(btn.dataset.design));
   });
 
   // Download button
@@ -592,6 +687,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // FY selector
   document.getElementById('fySelect').addEventListener('change', loadData);
+
+  // Students chart controls
+  document.getElementById('studentsStart').addEventListener('change', loadStudentsChart);
+  document.getElementById('studentsEnd').addEventListener('change', loadStudentsChart);
+  document.querySelectorAll('.gran-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.gran-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      studentsGranularity = btn.dataset.gran;
+      loadStudentsChart();
+    });
+  });
 
   // Initial load
   loadData();

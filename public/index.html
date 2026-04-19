@@ -34,6 +34,7 @@
     <div class="design-toggle">
       <button class="design-btn active" data-design="cards">KPI Cards</button>
       <button class="design-btn" data-design="table">Table View</button>
+      <button class="design-btn" data-design="students">Number of Souled Students</button>
     </div>
     <button id="downloadBtn" class="download-btn" title="Download Excel with FY25 & FY26 data">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -43,12 +44,45 @@
 
   <div id="cards-view"></div>
   <div id="table-view" style="display:none;"></div>
+  <div id="students-view" style="display:none;">
+    <section class="kpi-section">
+      <h2 class="section-title">Souled Students with a Coach</h2>
+      <div class="kpi-grid" style="grid-template-columns: minmax(220px, 280px);">
+        <div class="kpi-card highlight">
+          <div class="kpi-label">Current Matched Students</div>
+          <div class="kpi-value" id="currentMatchedValue">—</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="kpi-section">
+      <div class="students-controls">
+        <div class="control-group">
+          <label for="studentsStart">Start:</label>
+          <input type="date" id="studentsStart" />
+        </div>
+        <div class="control-group">
+          <label for="studentsEnd">End:</label>
+          <input type="date" id="studentsEnd" />
+        </div>
+        <div class="control-group granularity-toggle">
+          <button class="gran-btn active" data-gran="daily">Daily</button>
+          <button class="gran-btn" data-gran="weekly">Weekly</button>
+          <button class="gran-btn" data-gran="monthly">Monthly</button>
+        </div>
+      </div>
+      <div class="chart-container">
+        <canvas id="studentsChart"></canvas>
+      </div>
+    </section>
+  </div>
 
   <footer class="exec-footer">
     <p>Data sourced live from Salesforce.</p>
   </footer>
 
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="executive.js"></script>
 </body>
 </html>

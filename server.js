@@ -568,6 +568,111 @@ function writeCache(fy, data) {
   }
 }
 
+// --- /api/matched-students-history ---
+// Returns daily matched-students count from Program__History on the Souled program
+const SOULED_PROGRAM_ID = 'a2F5f000000yRpfEAE';
+
+app.get('/api/matched-students-history', async (req, res) => {
+  try {
+    const startDate = req.query.start || '2024-10-20'; // earliest history available
+    const endDate = req.query.end || new Date().toISOString().slice(0, 10);
+    const granularity = req.query.granularity || 'daily'; // daily | weekly | monthly
+
+    const conn = await getSfConnection();
+
+    // Get current value (the latest snapshot) so we can stamp "today" even if no change occurred
+    const program = await conn.query(
+      `SELECT Matched_Students__c FROM Program__c WHERE Id = '${SOULED_PROGRAM_ID}' LIMIT 1`
+    );
+    const currentValue = program.records[0]?.Matched_Students__c ?? null;
+
+    // Pull all history in range
+    const records = await queryAll(conn,
+      `SELECT NewValue, CreatedDate FROM Program__History
+       WHERE ParentId = '${SOULED_PROGRAM_ID}'
+       AND Field = 'Matched_Students__c'
+       AND CreatedDate <= ${endDate}T23:59:59Z
+       ORDER BY CreatedDate ASC`
+    );
+
+    // Also need the value just BEFORE startDate so the chart can begin with a known value
+    const priorRecords = await queryAll(conn,
+      `SELECT NewValue, CreatedDate FROM Program__History
+       WHERE ParentId = '${SOULED_PROGRAM_ID}'
+       AND Field = 'Matched_Students__c'
+       AND CreatedDate < ${startDate}T00:00:00Z
+       ORDER BY CreatedDate DESC LIMIT 1`
+    );
+    const seedValue = priorRecords[0]?.NewValue ?? null;
+
+    // Group history records by day → take the LAST value of each day
+    const dailyLast = new Map(); // 'YYYY-MM-DD' -> value
+    for (const r of records) {
+      const day = new Date(r.CreatedDate).toISOString().slice(0, 10);
+      dailyLast.set(day, Number(r.NewValue));
+    }
+
+    // Build a continuous daily series from startDate → endDate
+    // For days with no change, carry forward the last known value
+    const series = [];
+    const start = new Date(startDate + 'T00:00:00Z');
+    const end = new Date(endDate + 'T00:00:00Z');
+    const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+
+    let lastValue = seedValue;
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      const dayStr = d.toISOString().slice(0, 10);
+      if (dailyLast.has(dayStr)) {
+        lastValue = dailyLast.get(dayStr);
+      } else if (d.getTime() === today.getTime() && currentValue !== null) {
+        // Stamp today with the live current value if no change today yet
+        lastValue = Number(currentValue);
+      }
+      if (lastValue !== null) {
+        series.push({ date: dayStr, value: lastValue });
+      }
+    }
+
+    // Aggregate by granularity
+    let aggregated = series;
+    if (granularity === 'weekly' || granularity === 'monthly') {
+      const buckets = new Map(); // bucketKey -> { sum, count, label }
+      for (const point of series) {
+        const d = new Date(point.date + 'T00:00:00Z');
+        let key;
+        if (granularity === 'weekly') {
+          // Week starting Sunday — key is the Sunday of the week
+          const sunday = new Date(d);
+          sunday.setUTCDate(d.getUTCDate() - d.getUTCDay());
+          key = sunday.toISOString().slice(0, 10);
+        } else {
+          // Monthly — key is YYYY-MM-01
+          key = d.toISOString().slice(0, 7) + '-01';
+        }
+        if (!buckets.has(key)) buckets.set(key, { sum: 0, count: 0 });
+        const b = buckets.get(key);
+        b.sum += point.value;
+        b.count += 1;
+      }
+      aggregated = Array.from(buckets.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([date, b]) => ({ date, value: Math.round((b.sum / b.count) * 10) / 10 }));
+    }
+
+    res.json({
+      currentValue,
+      startDate,
+      endDate,
+      granularity,
+      earliestAvailable: '2024-10-20',
+      data: aggregated
+    });
+  } catch (err) {
+    console.error('Error fetching matched students history:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- /api/executive-data ---
 app.get('/api/executive-data', async (req, res) => {
   try {

@@ -568,25 +568,135 @@ function writeCache(fy, data) {
   }
 }
 
+// --- Souled Program ID + reusable history helpers ---
+const SOULED_PROGRAM_ID = 'a2F5f000000yRpfEAE';
+
+// Walk a chronologically-sorted list of history records and build a continuous
+// daily series from start..end with carry-forward semantics.
+//   records: [{ Field, NewValue, CreatedDate }]   (CreatedDate = ISO string)
+//   field: which field to track (in case multiple are mixed)
+//   start/end: 'YYYY-MM-DD' strings (UTC days)
+//   seedValue: value to use before any history record (or null)
+//   todayLiveValue: optional override for "today" if there's no history change today
+// Returns array of { date: 'YYYY-MM-DD', value: number|null }
+function buildDailySeries(records, field, start, end, seedValue, todayLiveValue) {
+  const dailyLast = new Map();
+  for (const r of records) {
+    if (field && r.Field !== field) continue;
+    const day = new Date(r.CreatedDate).toISOString().slice(0, 10);
+    dailyLast.set(day, Number(r.NewValue));
+  }
+  const series = [];
+  const startD = new Date(start + 'T00:00:00Z');
+  const endD = new Date(end + 'T00:00:00Z');
+  const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  let lastValue = seedValue;
+  for (let d = new Date(startD); d <= endD; d.setUTCDate(d.getUTCDate() + 1)) {
+    const dayStr = d.toISOString().slice(0, 10);
+    if (dailyLast.has(dayStr)) {
+      lastValue = dailyLast.get(dayStr);
+    } else if (d.getTime() === today.getTime() && todayLiveValue != null) {
+      lastValue = Number(todayLiveValue);
+    }
+    series.push({ date: dayStr, value: lastValue });
+  }
+  return series;
+}
+
+// Bucket a daily series into weekly/monthly using the MEAN of daily values.
+function aggregateBucketsAvg(series, granularity) {
+  if (granularity === 'daily') return series.filter(p => p.value !== null);
+  const buckets = new Map();
+  for (const point of series) {
+    if (point.value === null) continue;
+    const d = new Date(point.date + 'T00:00:00Z');
+    let key;
+    if (granularity === 'weekly') {
+      const sunday = new Date(d);
+      sunday.setUTCDate(d.getUTCDate() - d.getUTCDay());
+      key = sunday.toISOString().slice(0, 10);
+    } else {
+      key = d.toISOString().slice(0, 7) + '-01';
+    }
+    if (!buckets.has(key)) buckets.set(key, { sum: 0, count: 0 });
+    const b = buckets.get(key);
+    b.sum += point.value;
+    b.count += 1;
+  }
+  return Array.from(buckets.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, b]) => ({ date, value: Math.round((b.sum / b.count) * 10) / 10 }));
+}
+
+// Bucket two parallel daily series (numerator, denominator) into a ratio per bucket.
+// Sums num and denom over the bucket then divides — does NOT average daily ratios.
+// numByDay/denByDay: Map<YYYY-MM-DD, number>
+function aggregateBucketsRatio(numByDay, denByDay, start, end, granularity) {
+  const startD = new Date(start + 'T00:00:00Z');
+  const endD = new Date(end + 'T00:00:00Z');
+  const buckets = new Map();
+  for (let d = new Date(startD); d <= endD; d.setUTCDate(d.getUTCDate() + 1)) {
+    const dayStr = d.toISOString().slice(0, 10);
+    let key;
+    if (granularity === 'daily') {
+      key = dayStr;
+    } else if (granularity === 'weekly') {
+      const sunday = new Date(d);
+      sunday.setUTCDate(d.getUTCDate() - d.getUTCDay());
+      key = sunday.toISOString().slice(0, 10);
+    } else {
+      key = dayStr.slice(0, 7) + '-01';
+    }
+    if (!buckets.has(key)) buckets.set(key, { num: 0, den: 0 });
+    const b = buckets.get(key);
+    b.num += numByDay.get(dayStr) || 0;
+    b.den += denByDay.get(dayStr) || 0;
+  }
+  return Array.from(buckets.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, b]) => ({
+      date,
+      // CPL is undefined when:
+      //   - no spend (ads paused) — would falsely show $0
+      //   - no registrations (no leads to attribute spend to)
+      // Either case → null so the chart shows a gap rather than misleading values.
+      value: (b.num > 0 && b.den > 0) ? Math.round((b.num / b.den) * 100) / 100 : null
+    }));
+  // NOTE: nulls are kept (not filtered) so the chart shows gaps where ads were paused.
+}
+
+// Lazy-loaded Meta spend cache (read once at server startup)
+let metaSpendCache = null;
+function getMetaSpendByDay() {
+  if (metaSpendCache) return metaSpendCache;
+  const cachePath = path.join(__dirname, 'data', 'meta_spend.json');
+  try {
+    const raw = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+    metaSpendCache = new Map(Object.entries(raw.spend_by_day || {}).map(([k, v]) => [k, Number(v)]));
+    console.log(`Loaded ${metaSpendCache.size} days of Meta spend from cache (latest: ${raw.latest})`);
+  } catch (e) {
+    console.warn('Could not load meta_spend.json:', e.message);
+    metaSpendCache = new Map();
+  }
+  return metaSpendCache;
+}
+
 // --- /api/matched-students-history ---
 // Returns daily matched-students count from Program__History on the Souled program
-const SOULED_PROGRAM_ID = 'a2F5f000000yRpfEAE';
 
 app.get('/api/matched-students-history', async (req, res) => {
   try {
-    const startDate = req.query.start || '2024-10-20'; // earliest history available
+    const startDate = req.query.start || '2024-10-20';
     const endDate = req.query.end || new Date().toISOString().slice(0, 10);
-    const granularity = req.query.granularity || 'daily'; // daily | weekly | monthly
+    const granularity = req.query.granularity || 'daily';
 
     const conn = await getSfConnection();
 
-    // Get current value (the latest snapshot) so we can stamp "today" even if no change occurred
     const program = await conn.query(
       `SELECT Matched_Students__c FROM Program__c WHERE Id = '${SOULED_PROGRAM_ID}' LIMIT 1`
     );
     const currentValue = program.records[0]?.Matched_Students__c ?? null;
 
-    // Pull all history in range
     const records = await queryAll(conn,
       `SELECT NewValue, CreatedDate FROM Program__History
        WHERE ParentId = '${SOULED_PROGRAM_ID}'
@@ -595,7 +705,6 @@ app.get('/api/matched-students-history', async (req, res) => {
        ORDER BY CreatedDate ASC`
     );
 
-    // Also need the value just BEFORE startDate so the chart can begin with a known value
     const priorRecords = await queryAll(conn,
       `SELECT NewValue, CreatedDate FROM Program__History
        WHERE ParentId = '${SOULED_PROGRAM_ID}'
@@ -605,59 +714,8 @@ app.get('/api/matched-students-history', async (req, res) => {
     );
     const seedValue = priorRecords[0]?.NewValue ?? null;
 
-    // Group history records by day → take the LAST value of each day
-    const dailyLast = new Map(); // 'YYYY-MM-DD' -> value
-    for (const r of records) {
-      const day = new Date(r.CreatedDate).toISOString().slice(0, 10);
-      dailyLast.set(day, Number(r.NewValue));
-    }
-
-    // Build a continuous daily series from startDate → endDate
-    // For days with no change, carry forward the last known value
-    const series = [];
-    const start = new Date(startDate + 'T00:00:00Z');
-    const end = new Date(endDate + 'T00:00:00Z');
-    const today = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
-
-    let lastValue = seedValue;
-    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
-      const dayStr = d.toISOString().slice(0, 10);
-      if (dailyLast.has(dayStr)) {
-        lastValue = dailyLast.get(dayStr);
-      } else if (d.getTime() === today.getTime() && currentValue !== null) {
-        // Stamp today with the live current value if no change today yet
-        lastValue = Number(currentValue);
-      }
-      if (lastValue !== null) {
-        series.push({ date: dayStr, value: lastValue });
-      }
-    }
-
-    // Aggregate by granularity
-    let aggregated = series;
-    if (granularity === 'weekly' || granularity === 'monthly') {
-      const buckets = new Map(); // bucketKey -> { sum, count, label }
-      for (const point of series) {
-        const d = new Date(point.date + 'T00:00:00Z');
-        let key;
-        if (granularity === 'weekly') {
-          // Week starting Sunday — key is the Sunday of the week
-          const sunday = new Date(d);
-          sunday.setUTCDate(d.getUTCDate() - d.getUTCDay());
-          key = sunday.toISOString().slice(0, 10);
-        } else {
-          // Monthly — key is YYYY-MM-01
-          key = d.toISOString().slice(0, 7) + '-01';
-        }
-        if (!buckets.has(key)) buckets.set(key, { sum: 0, count: 0 });
-        const b = buckets.get(key);
-        b.sum += point.value;
-        b.count += 1;
-      }
-      aggregated = Array.from(buckets.entries())
-        .sort((a, b) => a[0].localeCompare(b[0]))
-        .map(([date, b]) => ({ date, value: Math.round((b.sum / b.count) * 10) / 10 }));
-    }
+    const series = buildDailySeries(records, null, startDate, endDate, seedValue, currentValue);
+    const aggregated = aggregateBucketsAvg(series, granularity);
 
     res.json({
       currentValue,
@@ -669,6 +727,157 @@ app.get('/api/matched-students-history', async (req, res) => {
     });
   } catch (err) {
     console.error('Error fetching matched students history:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- /api/student-overlays ---
+// Returns optional capacity and CPL series for the same chart.
+// Query params:
+//   start, end:    YYYY-MM-DD (defaults: 2024-10-21 / today)
+//   granularity:   daily | weekly | monthly  (default daily)
+//   include:       comma-separated subset of: capacity, currentCapacity, cpl
+const CAPACITY_FIELDS = {
+  capacity: 'Total_One_On_One_Capacity__c',          // structural max
+  currentCapacity: 'One_On_One_Capacity__c'           // current effective
+};
+const EARLIEST_CAPACITY_HISTORY = '2024-10-21';
+
+app.get('/api/student-overlays', async (req, res) => {
+  try {
+    const startDate = req.query.start || EARLIEST_CAPACITY_HISTORY;
+    const endDate = req.query.end || new Date().toISOString().slice(0, 10);
+    const granularity = req.query.granularity || 'daily';
+    const include = (req.query.include || '').split(',').map(s => s.trim()).filter(Boolean);
+
+    const wantsCapacity = include.includes('capacity') || include.includes('currentCapacity');
+    const wantsCPL = include.includes('cpl');
+
+    const conn = await getSfConnection();
+    const testIds = await getTestContactIds(conn);
+
+    const out = { startDate, endDate, granularity, earliestAvailable: EARLIEST_CAPACITY_HISTORY, series: {} };
+
+    // ----- Capacity (sum across Souled coaches with carry-forward per coach) -----
+    if (wantsCapacity) {
+      // 1. Identify all coaches with a Souled relationship overlapping the window.
+      //    NOT just current-employed coaches — past coaches' historical capacity matters too.
+      const coachRels = await queryAll(conn,
+        `SELECT Mentor__c FROM Relationship__c
+         WHERE Type__c = 'Souled Coach'
+         AND Start_Date__c <= ${endDate}
+         AND (End_Date__c >= ${startDate} OR End_Date__c = null)`
+      );
+      const coachIds = [...new Set(coachRels.map(r => r.Mentor__c).filter(id => id && !testIds.has(id)))];
+
+      if (coachIds.length > 0) {
+        const fieldsToQuery = include.filter(k => k in CAPACITY_FIELDS).map(k => CAPACITY_FIELDS[k]);
+        const fieldsList = fieldsToQuery.map(f => `'${f}'`).join(',');
+
+        // Batch the IN clause to avoid SOQL length limits (~20K chars)
+        const BATCH = 200;
+        const allHistory = [];
+        const allPrior = [];
+        for (let i = 0; i < coachIds.length; i += BATCH) {
+          const batch = coachIds.slice(i, i + BATCH);
+          const idsList = batch.map(id => `'${id}'`).join(',');
+
+          const hist = await queryAll(conn,
+            `SELECT ContactId, Field, NewValue, CreatedDate FROM ContactHistory
+             WHERE ContactId IN (${idsList})
+             AND Field IN (${fieldsList})
+             AND CreatedDate <= ${endDate}T23:59:59Z
+             ORDER BY CreatedDate ASC`
+          );
+          allHistory.push(...hist);
+
+          // Most recent value before startDate per coach, per field — for seeding
+          const prior = await queryAll(conn,
+            `SELECT ContactId, Field, NewValue, CreatedDate FROM ContactHistory
+             WHERE ContactId IN (${idsList})
+             AND Field IN (${fieldsList})
+             AND CreatedDate < ${startDate}T00:00:00Z
+             ORDER BY CreatedDate DESC`
+          );
+          allPrior.push(...prior);
+        }
+
+        // Index: prior[coachId][field] = latest value before window
+        const seedByCoach = {};
+        for (const r of allPrior) {
+          if (!seedByCoach[r.ContactId]) seedByCoach[r.ContactId] = {};
+          if (seedByCoach[r.ContactId][r.Field] === undefined) {
+            // Records came back DESC; first one we see for a (coach,field) is the latest
+            seedByCoach[r.ContactId][r.Field] = Number(r.NewValue);
+          }
+        }
+
+        // Index: history[coachId][field] = [{NewValue, CreatedDate}...] in chronological order
+        const histByCoach = {};
+        for (const r of allHistory) {
+          if (!histByCoach[r.ContactId]) histByCoach[r.ContactId] = {};
+          if (!histByCoach[r.ContactId][r.Field]) histByCoach[r.ContactId][r.Field] = [];
+          histByCoach[r.ContactId][r.Field].push(r);
+        }
+
+        // Build per-coach daily series, then sum across coaches per day, per field
+        for (const overlay of ['capacity', 'currentCapacity']) {
+          if (!include.includes(overlay)) continue;
+          const field = CAPACITY_FIELDS[overlay];
+
+          const sumByDay = new Map(); // 'YYYY-MM-DD' -> total
+          const startD = new Date(startDate + 'T00:00:00Z');
+          const endD = new Date(endDate + 'T00:00:00Z');
+          for (let d = new Date(startD); d <= endD; d.setUTCDate(d.getUTCDate() + 1)) {
+            sumByDay.set(d.toISOString().slice(0, 10), 0);
+          }
+
+          for (const coachId of coachIds) {
+            const seed = seedByCoach[coachId]?.[field] ?? null;
+            const records = histByCoach[coachId]?.[field] || [];
+            const series = buildDailySeries(records, field, startDate, endDate, seed, null);
+            for (const point of series) {
+              if (point.value != null) {
+                sumByDay.set(point.date, (sumByDay.get(point.date) || 0) + point.value);
+              }
+            }
+          }
+
+          const dailyArr = Array.from(sumByDay.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([date, value]) => ({ date, value }));
+          out.series[overlay] = aggregateBucketsAvg(dailyArr, granularity);
+        }
+      } else {
+        if (include.includes('capacity')) out.series.capacity = [];
+        if (include.includes('currentCapacity')) out.series.currentCapacity = [];
+      }
+    }
+
+    // ----- Real CPL: Meta spend / new Souled registrations -----
+    if (wantsCPL) {
+      const spendByDay = getMetaSpendByDay();
+
+      // New Souled registrations per day, excluding test students
+      const regs = await queryAll(conn,
+        `SELECT Id, Student__c, CreatedDate FROM Registration__c
+         WHERE Program__c = '${SOULED_PROGRAM_ID}'
+         AND CreatedDate >= ${startDate}T00:00:00Z
+         AND CreatedDate <= ${endDate}T23:59:59Z`
+      );
+      const regsByDay = new Map();
+      for (const r of regs) {
+        if (testIds.has(r.Student__c)) continue;
+        const day = new Date(r.CreatedDate).toISOString().slice(0, 10);
+        regsByDay.set(day, (regsByDay.get(day) || 0) + 1);
+      }
+
+      out.series.cpl = aggregateBucketsRatio(spendByDay, regsByDay, startDate, endDate, granularity);
+    }
+
+    res.json(out);
+  } catch (err) {
+    console.error('Error fetching student overlays:', err);
     res.status(500).json({ error: err.message });
   }
 });

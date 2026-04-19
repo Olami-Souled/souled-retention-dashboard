@@ -399,6 +399,51 @@
   color: #fff;
 }
 
+.overlay-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  font-size: 0.9rem;
+}
+
+.overlay-label {
+  font-weight: 600;
+  color: #2d3436;
+}
+
+.overlay-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.overlay-controls label:hover {
+  background: #f0f3f5;
+}
+
+.overlay-controls input[type="checkbox"] {
+  accent-color: #0984e3;
+  cursor: pointer;
+}
+
+.overlay-hint {
+  margin-left: auto;
+  color: #636e72;
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
 .chart-container {
   background: #fff;
   border-radius: 8px;

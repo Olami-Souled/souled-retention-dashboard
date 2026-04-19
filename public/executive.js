@@ -578,6 +578,13 @@ async function downloadExcel() {
 // --- Number of Souled Students chart ---
 let studentsChart = null;
 let studentsGranularity = 'daily';
+const enabledOverlays = new Set();
+
+const OVERLAY_STYLE = {
+  capacity: { label: 'Total Capacity', color: '#00b894', dash: [6, 4], axis: 'y' },
+  currentCapacity: { label: 'Current Capacity', color: '#fd7e14', dash: [], axis: 'y' },
+  cpl: { label: 'Real CPL ($)', color: '#d63031', dash: [], axis: 'y1' }
+};
 
 async function loadStudentsChart() {
   const startInput = document.getElementById('studentsStart');
@@ -586,50 +593,88 @@ async function loadStudentsChart() {
   const end = endInput.value;
 
   try {
-    const res = await fetch(`/api/matched-students-history?start=${start}&end=${end}&granularity=${studentsGranularity}`);
-    if (!res.ok) throw new Error(`API error: ${res.status}`);
-    const payload = await res.json();
+    // Always fetch the matched-students series; conditionally fetch overlays
+    const fetches = [
+      fetch(`/api/matched-students-history?start=${start}&end=${end}&granularity=${studentsGranularity}`).then(r => r.json())
+    ];
+    if (enabledOverlays.size > 0) {
+      const include = [...enabledOverlays].join(',');
+      fetches.push(
+        fetch(`/api/student-overlays?start=${start}&end=${end}&granularity=${studentsGranularity}&include=${include}`).then(r => r.json())
+      );
+    }
+    const [students, overlaysPayload] = await Promise.all(fetches);
+    if (students.error) throw new Error(students.error);
 
-    // Update KPI
+    // KPI + min date
     document.getElementById('currentMatchedValue').textContent =
-      payload.currentValue !== null ? Number(payload.currentValue).toLocaleString() : '—';
+      students.currentValue !== null ? Number(students.currentValue).toLocaleString() : '—';
+    if (students.earliestAvailable) startInput.min = students.earliestAvailable;
 
-    // Tighten the start-input min to the earliest available date
-    if (payload.earliestAvailable) {
-      startInput.min = payload.earliestAvailable;
+    // Build datasets: students always first, then any overlays
+    const labels = students.data.map(p => p.date);
+    const datasets = [{
+      label: 'Souled Students with a Coach',
+      data: students.data.map(p => p.value),
+      borderColor: '#0984e3',
+      backgroundColor: 'rgba(9, 132, 227, 0.1)',
+      fill: true,
+      tension: 0.25,
+      pointRadius: studentsGranularity === 'daily' ? 0 : 3,
+      pointHoverRadius: 5,
+      borderWidth: 2,
+      yAxisID: 'y'
+    }];
+
+    if (overlaysPayload && overlaysPayload.series) {
+      // Build a date→value map per overlay so we can align with the labels axis
+      for (const key of ['capacity', 'currentCapacity', 'cpl']) {
+        if (!enabledOverlays.has(key) || !overlaysPayload.series[key]) continue;
+        const style = OVERLAY_STYLE[key];
+        const byDate = new Map(overlaysPayload.series[key].map(p => [p.date, p.value]));
+        datasets.push({
+          label: style.label,
+          data: labels.map(d => byDate.has(d) ? byDate.get(d) : null),
+          borderColor: style.color,
+          backgroundColor: style.color + '20',
+          borderDash: style.dash,
+          fill: false,
+          tension: 0.25,
+          pointRadius: studentsGranularity === 'daily' ? 0 : 3,
+          pointHoverRadius: 5,
+          borderWidth: 2,
+          yAxisID: style.axis,
+          // For CPL specifically: gaps mean ads were paused (no spend) — show them
+          // as visible breaks. For capacity overlays: bridge minor gaps.
+          spanGaps: key !== 'cpl'
+        });
+      }
     }
 
-    const labels = payload.data.map(p => p.date);
-    const values = payload.data.map(p => p.value);
+    const showRightAxis = enabledOverlays.has('cpl');
 
     const ctx = document.getElementById('studentsChart').getContext('2d');
     if (studentsChart) studentsChart.destroy();
     studentsChart = new Chart(ctx, {
       type: 'line',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Souled Students with a Coach',
-          data: values,
-          borderColor: '#0984e3',
-          backgroundColor: 'rgba(9, 132, 227, 0.1)',
-          fill: true,
-          tension: 0.25,
-          pointRadius: studentsGranularity === 'daily' ? 0 : 3,
-          pointHoverRadius: 5,
-          borderWidth: 2
-        }]
-      },
+      data: { labels, datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: false },
+          legend: { display: datasets.length > 1, position: 'bottom' },
           tooltip: {
             callbacks: {
               title: items => items[0].label,
-              label: item => ` ${Number(item.parsed.y).toLocaleString()} students`
+              label: item => {
+                const v = item.parsed.y;
+                if (v === null || v === undefined) return null;
+                if (item.dataset.label === 'Real CPL ($)') {
+                  return ` ${item.dataset.label}: $${Number(v).toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+                }
+                return ` ${item.dataset.label}: ${Number(v).toLocaleString()}`;
+              }
             }
           }
         },
@@ -639,8 +684,18 @@ async function loadStudentsChart() {
             grid: { display: false }
           },
           y: {
+            position: 'left',
             beginAtZero: false,
+            title: { display: true, text: 'Students / Capacity' },
             ticks: { callback: v => Number(v).toLocaleString() }
+          },
+          y1: {
+            position: 'right',
+            display: showRightAxis,
+            beginAtZero: true,
+            title: { display: true, text: 'CPL ($)' },
+            grid: { drawOnChartArea: false },
+            ticks: { callback: v => '$' + Number(v).toLocaleString() }
           }
         }
       }
@@ -696,6 +751,16 @@ document.addEventListener('DOMContentLoaded', () => {
       document.querySelectorAll('.gran-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       studentsGranularity = btn.dataset.gran;
+      loadStudentsChart();
+    });
+  });
+
+  // Overlay checkboxes
+  document.querySelectorAll('.overlay-controls input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const key = cb.dataset.overlay;
+      if (cb.checked) enabledOverlays.add(key);
+      else enabledOverlays.delete(key);
       loadStudentsChart();
     });
   });

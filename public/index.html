@@ -71,6 +71,13 @@
           <button class="gran-btn" data-gran="monthly">Monthly</button>
         </div>
       </div>
+      <div class="overlay-controls">
+        <span class="overlay-label">Show on chart:</span>
+        <label><input type="checkbox" data-overlay="capacity"> Total Capacity</label>
+        <label><input type="checkbox" data-overlay="currentCapacity"> Current Capacity</label>
+        <label><input type="checkbox" data-overlay="cpl"> Real CPL ($)</label>
+        <span class="overlay-hint">CPL = Souled Meta spend &divide; new Souled registrations (excl. test)</span>
+      </div>
       <div class="chart-container">
         <canvas id="studentsChart"></canvas>
       </div>

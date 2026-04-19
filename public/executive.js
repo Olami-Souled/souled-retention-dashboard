@@ -584,7 +584,7 @@ const OVERLAY_STYLE = {
   capacity: { label: 'Total Capacity', color: '#00b894', dash: [6, 4], axis: 'y' },
   currentCapacity: { label: 'Current Capacity', color: '#fd7e14', dash: [], axis: 'y' },
   registrations: { label: 'New Registrations', color: '#6c5ce7', dash: [], axis: 'y1', unit: 'regs' },
-  cpl: { label: 'Real CPL ($)', color: '#d63031', dash: [], axis: 'y1', unit: 'usd' }
+  cpl: { label: 'Cost per Signup ($)', color: '#d63031', dash: [], axis: 'y1', unit: 'usd' }
 };
 
 async function loadStudentsChart() {
@@ -657,8 +657,8 @@ async function loadStudentsChart() {
     // If both use it, we still use a single y1 axis. CPL is in $; registrations is a count.
     // When BOTH are on we label the axis generically; otherwise label by which one is on.
     const rightAxisLabel = (enabledOverlays.has('cpl') && enabledOverlays.has('registrations'))
-      ? 'CPL ($) / Registrations'
-      : enabledOverlays.has('cpl') ? 'CPL ($)' : 'New Registrations';
+      ? 'Cost per Signup ($) / Registrations'
+      : enabledOverlays.has('cpl') ? 'Cost per Signup ($)' : 'New Registrations';
 
     const ctx = document.getElementById('studentsChart').getContext('2d');
     if (studentsChart) studentsChart.destroy();
@@ -678,7 +678,7 @@ async function loadStudentsChart() {
                 const v = item.parsed.y;
                 if (v === null || v === undefined) return null;
                 const rounded = Math.round(Number(v));
-                if (item.dataset.label === 'Real CPL ($)') {
+                if (item.dataset.label === 'Cost per Signup ($)') {
                   return ` ${item.dataset.label}: $${rounded.toLocaleString()}`;
                 }
                 if (item.dataset.label === 'New Registrations') {

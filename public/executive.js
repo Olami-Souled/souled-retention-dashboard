@@ -578,14 +578,14 @@ async function downloadExcel() {
 // --- Number of Souled Students chart ---
 let studentsChart = null;
 let studentsGranularity = 'weekly';
-let includeBufferInCapacity = true; // default: show raw Current Capacity (incl. buffer). Uncheck to show effective (capacity − buffer).
 const enabledOverlays = new Set();
 
 const OVERLAY_STYLE = {
-  capacity: { label: 'Total Capacity', color: '#00b894', dash: [6, 4], axis: 'y' },
-  currentCapacity: { label: 'Current Capacity', color: '#fd7e14', dash: [], axis: 'y' },
-  registrations: { label: 'New Registrations', color: '#6c5ce7', dash: [], axis: 'y1', unit: 'regs' },
-  cpl: { label: 'Cost per Signup ($)', color: '#d63031', dash: [], axis: 'y1', unit: 'usd' }
+  capacity:                { label: 'Total Capacity',           color: '#00b894', dash: [6, 4], axis: 'y' },
+  currentCapacity:         { label: 'Current Capacity',         color: '#fd7e14', dash: [],     axis: 'y' },
+  currentCapacityBuffered: { label: 'Current Capacity buffered', color: '#ffa94d', dash: [4, 3], axis: 'y' },
+  registrations:           { label: 'New Registrations',         color: '#6c5ce7', dash: [],     axis: 'y1', unit: 'regs' },
+  cpl:                     { label: 'Cost per Signup ($)',       color: '#d63031', dash: [],     axis: 'y1', unit: 'usd' }
 };
 
 async function loadStudentsChart() {
@@ -600,7 +600,14 @@ async function loadStudentsChart() {
       fetch(`/api/matched-students-history?start=${start}&end=${end}&granularity=${studentsGranularity}`).then(r => r.json())
     ];
     if (enabledOverlays.size > 0) {
-      const include = [...enabledOverlays].join(',');
+      // 'currentCapacityBuffered' is computed client-side from currentCapacity − buffer.
+      // Make sure the backend is asked for currentCapacity whenever buffered is enabled.
+      const apiInclude = new Set(enabledOverlays);
+      if (apiInclude.has('currentCapacityBuffered')) {
+        apiInclude.add('currentCapacity'); // gives us both the value and the buffer series
+        apiInclude.delete('currentCapacityBuffered'); // not a backend key
+      }
+      const include = [...apiInclude].join(',');
       fetches.push(
         fetch(`/api/student-overlays?start=${start}&end=${end}&granularity=${studentsGranularity}&include=${include}`).then(r => r.json())
       );
@@ -628,40 +635,37 @@ async function loadStudentsChart() {
       yAxisID: 'y'
     }];
 
-    // Pre-compute the per-date buffer map for use both by Current Capacity (subtracting it
-     // when "Include buffer" is off) and by the tooltip footer ("Available spots").
+    // Per-date map of policy buffer (active coach count). Used for the buffered overlay
+    // and for the "Available spots" tooltip footer when relevant.
     const bufferByDate = (overlaysPayload && overlaysPayload.series && overlaysPayload.series.buffer)
       ? new Map(overlaysPayload.series.buffer.map(p => [p.date, p.value]))
       : new Map();
+    const currentCapByDate = (overlaysPayload && overlaysPayload.series && overlaysPayload.series.currentCapacity)
+      ? new Map(overlaysPayload.series.currentCapacity.map(p => [p.date, p.value]))
+      : new Map();
 
     if (overlaysPayload && overlaysPayload.series) {
-      // Build a date→value map per overlay so we can align with the labels axis
-      for (const key of ['capacity', 'currentCapacity', 'registrations', 'cpl']) {
-        if (!enabledOverlays.has(key) || !overlaysPayload.series[key]) continue;
+      for (const key of ['capacity', 'currentCapacity', 'currentCapacityBuffered', 'registrations', 'cpl']) {
+        if (!enabledOverlays.has(key)) continue;
         const style = OVERLAY_STYLE[key];
-        const byDate = new Map(overlaysPayload.series[key].map(p => [p.date, p.value]));
 
-        // Compute display value. For Current Capacity: when "Include buffer" is OFF (default),
-        // we show currentCapacity − buffer (= "effective capacity"). When ON, we show the raw
-        // currentCapacity. Label updates to match.
-        let displayLabel = style.label;
-        const dataValues = labels.map(d => {
-          let v = byDate.has(d) ? byDate.get(d) : null;
-          if (key === 'currentCapacity' && v !== null && !includeBufferInCapacity) {
+        // Source values come from the API for everything except the buffered variant,
+        // which is computed locally as currentCapacity − buffer.
+        let sourceMap;
+        if (key === 'currentCapacityBuffered') {
+          sourceMap = new Map();
+          for (const [d, capVal] of currentCapByDate.entries()) {
             const b = bufferByDate.get(d) ?? 0;
-            v = Math.max(0, v - b);
+            sourceMap.set(d, Math.max(0, capVal - b));
           }
-          return v;
-        });
-        if (key === 'currentCapacity') {
-          displayLabel = includeBufferInCapacity
-            ? 'Current Capacity (incl. ~40-spot buffer)'
-            : 'Current Capacity (excl. ~40-spot buffer)';
+        } else {
+          if (!overlaysPayload.series[key]) continue;
+          sourceMap = new Map(overlaysPayload.series[key].map(p => [p.date, p.value]));
         }
 
         datasets.push({
-          label: displayLabel,
-          data: dataValues,
+          label: style.label,
+          data: labels.map(d => sourceMap.has(d) ? sourceMap.get(d) : null),
           borderColor: style.color,
           backgroundColor: style.color + '20',
           borderDash: style.dash,
@@ -671,8 +675,7 @@ async function loadStudentsChart() {
           pointHoverRadius: 5,
           borderWidth: 2,
           yAxisID: style.axis,
-          // For CPL specifically: gaps mean ads were paused (no spend) — show them
-          // as visible breaks. Other overlays bridge minor gaps.
+          // CPL: gaps mean ads paused (no spend) — show as visible breaks. Others bridge.
           spanGaps: key !== 'cpl'
         });
       }
@@ -713,17 +716,22 @@ async function loadStudentsChart() {
                 return ` ${item.dataset.label}: ${rounded.toLocaleString()}`;
               },
               footer: items => {
-                // "Available spots" = displayed Current Capacity − Souled Students.
-                // Only meaningful when both lines are present at this date.
+                // "Available spots" = (Current Capacity variant on chart) − Souled Students.
+                // Prefer the buffered line if both are shown (it's the policy-aware view).
                 const studentsItem = items.find(i => i.dataset.label === 'Souled Students with a Coach');
-                const capItem = items.find(i => i.dataset.label && i.dataset.label.startsWith('Current Capacity'));
-                if (!studentsItem || !capItem) return undefined;
+                if (!studentsItem) return undefined;
+                const bufItem = items.find(i => i.dataset.label === 'Current Capacity buffered');
+                const rawItem = items.find(i => i.dataset.label === 'Current Capacity');
+                const lines = [];
                 const sv = studentsItem.parsed.y;
-                const cv = capItem.parsed.y;
-                if (sv === null || cv === null || sv === undefined || cv === undefined) return undefined;
-                const avail = Math.round(cv - sv);
-                const suffix = includeBufferInCapacity ? ' (incl. ~40 buffer)' : ' (excl. ~40 buffer)';
-                return `Available spots: ${avail.toLocaleString()}${suffix}`;
+                if (sv === null || sv === undefined) return undefined;
+                if (rawItem && rawItem.parsed.y != null) {
+                  lines.push(`Available spots: ${Math.round(rawItem.parsed.y - sv).toLocaleString()}`);
+                }
+                if (bufItem && bufItem.parsed.y != null) {
+                  lines.push(`Available (above buffer): ${Math.round(bufItem.parsed.y - sv).toLocaleString()}`);
+                }
+                return lines.length ? lines : undefined;
               }
             }
           }
@@ -812,7 +820,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Overlay checkboxes (the data-overlay ones)
+  // Overlay checkboxes
   document.querySelectorAll('.overlay-controls input[data-overlay]').forEach(cb => {
     cb.addEventListener('change', () => {
       const key = cb.dataset.overlay;
@@ -821,15 +829,6 @@ document.addEventListener('DOMContentLoaded', () => {
       loadStudentsChart();
     });
   });
-
-  // Buffer toggle (modifier on Current Capacity)
-  const bufferToggle = document.getElementById('includeBufferToggle');
-  if (bufferToggle) {
-    bufferToggle.addEventListener('change', () => {
-      includeBufferInCapacity = bufferToggle.checked;
-      loadStudentsChart();
-    });
-  }
 
   // Initial load
   loadData();

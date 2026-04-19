@@ -73,12 +73,11 @@
       </div>
       <div class="overlay-controls">
         <span class="overlay-label">Show on chart:</span>
-        <label><input type="checkbox" data-overlay="capacity"> Total Capacity</label>
-        <label><input type="checkbox" data-overlay="currentCapacity"> Current Capacity</label>
-        <label><input type="checkbox" data-overlay="registrations"> New Registrations</label>
+        <label title="The combined capacity of all employed coaches, regardless of whether they can currently work at this capacity"><input type="checkbox" data-overlay="capacity"> Total Capacity</label>
+        <label title="The number of students that all coaches can meet with at this time"><input type="checkbox" data-overlay="currentCapacity"> Current Capacity</label>
+        <label title="Current capacity minus ~40 spots (about one per coach on staff), allowing new students to register and choose a coach"><input type="checkbox" data-overlay="currentCapacityBuffered"> Current Capacity buffered</label>
+        <label title="The number of students who signed up, regardless of whether they chose a coach"><input type="checkbox" data-overlay="registrations"> New Registrations</label>
         <label><input type="checkbox" data-overlay="cpl"> Cost per Signup ($)</label>
-        <label class="overlay-modifier"><input type="checkbox" id="includeBufferToggle" checked> Include ~40-spot buffer in capacity</label>
-        <span class="overlay-hint">Buffer = ~1 open spot per active coach (~40 today) so new students can choose a coach</span>
       </div>
       <div class="chart-container">
         <canvas id="studentsChart"></canvas>

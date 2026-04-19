@@ -578,6 +578,7 @@ async function downloadExcel() {
 // --- Number of Souled Students chart ---
 let studentsChart = null;
 let studentsGranularity = 'weekly';
+let includeBufferInCapacity = false; // when false (default), Current Capacity is shown reduced by per-day buffer
 const enabledOverlays = new Set();
 
 const OVERLAY_STYLE = {
@@ -627,15 +628,40 @@ async function loadStudentsChart() {
       yAxisID: 'y'
     }];
 
+    // Pre-compute the per-date buffer map for use both by Current Capacity (subtracting it
+     // when "Include buffer" is off) and by the tooltip footer ("Available spots").
+    const bufferByDate = (overlaysPayload && overlaysPayload.series && overlaysPayload.series.buffer)
+      ? new Map(overlaysPayload.series.buffer.map(p => [p.date, p.value]))
+      : new Map();
+
     if (overlaysPayload && overlaysPayload.series) {
       // Build a date→value map per overlay so we can align with the labels axis
       for (const key of ['capacity', 'currentCapacity', 'registrations', 'cpl']) {
         if (!enabledOverlays.has(key) || !overlaysPayload.series[key]) continue;
         const style = OVERLAY_STYLE[key];
         const byDate = new Map(overlaysPayload.series[key].map(p => [p.date, p.value]));
+
+        // Compute display value. For Current Capacity: when "Include buffer" is OFF (default),
+        // we show currentCapacity − buffer (= "effective capacity"). When ON, we show the raw
+        // currentCapacity. Label updates to match.
+        let displayLabel = style.label;
+        const dataValues = labels.map(d => {
+          let v = byDate.has(d) ? byDate.get(d) : null;
+          if (key === 'currentCapacity' && v !== null && !includeBufferInCapacity) {
+            const b = bufferByDate.get(d) ?? 0;
+            v = Math.max(0, v - b);
+          }
+          return v;
+        });
+        if (key === 'currentCapacity') {
+          displayLabel = includeBufferInCapacity
+            ? 'Current Capacity (incl. buffer)'
+            : 'Current Capacity (after buffer)';
+        }
+
         datasets.push({
-          label: style.label,
-          data: labels.map(d => byDate.has(d) ? byDate.get(d) : null),
+          label: displayLabel,
+          data: dataValues,
           borderColor: style.color,
           backgroundColor: style.color + '20',
           borderDash: style.dash,
@@ -685,6 +711,19 @@ async function loadStudentsChart() {
                   return ` ${item.dataset.label}: ${rounded.toLocaleString()} this ${studentsGranularity === 'monthly' ? 'month' : studentsGranularity === 'weekly' ? 'week' : 'day'}`;
                 }
                 return ` ${item.dataset.label}: ${rounded.toLocaleString()}`;
+              },
+              footer: items => {
+                // "Available spots" = displayed Current Capacity − Souled Students.
+                // Only meaningful when both lines are present at this date.
+                const studentsItem = items.find(i => i.dataset.label === 'Souled Students with a Coach');
+                const capItem = items.find(i => i.dataset.label && i.dataset.label.startsWith('Current Capacity'));
+                if (!studentsItem || !capItem) return undefined;
+                const sv = studentsItem.parsed.y;
+                const cv = capItem.parsed.y;
+                if (sv === null || cv === null || sv === undefined || cv === undefined) return undefined;
+                const avail = Math.round(cv - sv);
+                const suffix = includeBufferInCapacity ? ' (incl. buffer)' : ' (above buffer)';
+                return `Available spots: ${avail.toLocaleString()}${suffix}`;
               }
             }
           }
@@ -773,8 +812,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Overlay checkboxes
-  document.querySelectorAll('.overlay-controls input[type="checkbox"]').forEach(cb => {
+  // Overlay checkboxes (the data-overlay ones)
+  document.querySelectorAll('.overlay-controls input[data-overlay]').forEach(cb => {
     cb.addEventListener('change', () => {
       const key = cb.dataset.overlay;
       if (cb.checked) enabledOverlays.add(key);
@@ -782,6 +821,15 @@ document.addEventListener('DOMContentLoaded', () => {
       loadStudentsChart();
     });
   });
+
+  // Buffer toggle (modifier on Current Capacity)
+  const bufferToggle = document.getElementById('includeBufferToggle');
+  if (bufferToggle) {
+    bufferToggle.addEventListener('change', () => {
+      includeBufferInCapacity = bufferToggle.checked;
+      loadStudentsChart();
+    });
+  }
 
   // Initial load
   loadData();

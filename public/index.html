@@ -77,7 +77,8 @@
         <label><input type="checkbox" data-overlay="currentCapacity"> Current Capacity</label>
         <label><input type="checkbox" data-overlay="registrations"> New Registrations</label>
         <label><input type="checkbox" data-overlay="cpl"> Cost per Signup ($)</label>
-        <span class="overlay-hint">Cost per Signup = Souled Meta spend &divide; new Souled registrations (excl. test)</span>
+        <label class="overlay-modifier"><input type="checkbox" id="includeBufferToggle"> Include buffer in capacity</label>
+        <span class="overlay-hint">Buffer = ~1 open spot per active coach so new students can choose a coach</span>
       </div>
       <div class="chart-container">
         <canvas id="studentsChart"></canvas>

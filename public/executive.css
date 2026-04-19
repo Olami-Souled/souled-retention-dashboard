@@ -437,11 +437,20 @@
   cursor: pointer;
 }
 
+.overlay-modifier {
+  border-left: 1px dashed #b2bec3;
+  padding-left: 14px;
+  margin-left: 4px;
+  color: #2d3436;
+}
+
 .overlay-hint {
   margin-left: auto;
   color: #636e72;
   font-size: 0.78rem;
   font-style: italic;
+  max-width: 280px;
+  text-align: right;
 }
 
 .chart-container {

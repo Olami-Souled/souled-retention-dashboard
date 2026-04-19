@@ -763,13 +763,34 @@ app.get('/api/student-overlays', async (req, res) => {
     if (wantsCapacity) {
       // 1. Identify all coaches with a Souled relationship overlapping the window.
       //    NOT just current-employed coaches — past coaches' historical capacity matters too.
+      //    Also pull Start/End dates so we can compute per-day "on-staff coach count" (= buffer size).
       const coachRels = await queryAll(conn,
-        `SELECT Mentor__c FROM Relationship__c
+        `SELECT Mentor__c, Start_Date__c, End_Date__c FROM Relationship__c
          WHERE Type__c = 'Souled Coach'
          AND Start_Date__c <= ${endDate}
          AND (End_Date__c >= ${startDate} OR End_Date__c = null)`
       );
       const coachIds = [...new Set(coachRels.map(r => r.Mentor__c).filter(id => id && !testIds.has(id)))];
+
+      // Index relationships by coachId so we can answer "is this coach on staff on day D?"
+      const relsByCoach = {};
+      for (const r of coachRels) {
+        if (!r.Mentor__c || testIds.has(r.Mentor__c)) continue;
+        if (!relsByCoach[r.Mentor__c]) relsByCoach[r.Mentor__c] = [];
+        relsByCoach[r.Mentor__c].push({
+          start: r.Start_Date__c ? new Date(r.Start_Date__c + 'T00:00:00Z') : null,
+          end:   r.End_Date__c   ? new Date(r.End_Date__c   + 'T00:00:00Z') : null
+        });
+      }
+      function coachOnStaff(coachId, dayDate) {
+        const rels = relsByCoach[coachId] || [];
+        for (const rel of rels) {
+          const startsOk = !rel.start || dayDate >= rel.start;
+          const endsOk = !rel.end || dayDate <= rel.end;
+          if (startsOk && endsOk) return true;
+        }
+        return false;
+      }
 
       if (coachIds.length > 0) {
         const fieldsToQuery = include.filter(k => k in CAPACITY_FIELDS).map(k => CAPACITY_FIELDS[k]);
@@ -849,9 +870,29 @@ app.get('/api/student-overlays', async (req, res) => {
             .map(([date, value]) => ({ date, value }));
           out.series[overlay] = aggregateBucketsAvg(dailyArr, granularity);
         }
+
+        // Per-day buffer = count of coaches currently on staff (one open spot kept per coach
+        // so newly-registered students can choose a coach). Returned alongside currentCapacity
+        // so the frontend can display "effective" capacity = currentCapacity − buffer.
+        if (include.includes('currentCapacity')) {
+          const bufferDailyArr = [];
+          const startD = new Date(startDate + 'T00:00:00Z');
+          const endD = new Date(endDate + 'T00:00:00Z');
+          for (let d = new Date(startD); d <= endD; d.setUTCDate(d.getUTCDate() + 1)) {
+            let count = 0;
+            for (const coachId of coachIds) {
+              if (coachOnStaff(coachId, d)) count += 1;
+            }
+            bufferDailyArr.push({ date: d.toISOString().slice(0, 10), value: count });
+          }
+          out.series.buffer = aggregateBucketsAvg(bufferDailyArr, granularity);
+        }
       } else {
         if (include.includes('capacity')) out.series.capacity = [];
-        if (include.includes('currentCapacity')) out.series.currentCapacity = [];
+        if (include.includes('currentCapacity')) {
+          out.series.currentCapacity = [];
+          out.series.buffer = [];
+        }
       }
     }
 

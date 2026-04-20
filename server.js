@@ -896,9 +896,9 @@ app.get('/api/student-overlays', async (req, res) => {
       }
     }
 
-    // ----- Registrations + Real CPL share the same SF query -----
+    // ----- New Registrations (all Souled regs, test-excluded) -----
     let regsByDay = null;
-    if (wantsCPL || wantsRegs) {
+    if (wantsRegs) {
       const regs = await queryAll(conn,
         `SELECT Id, Student__c, CreatedDate FROM Registration__c
          WHERE Program__c = '${SOULED_PROGRAM_ID}'
@@ -913,9 +913,31 @@ app.get('/api/student-overlays', async (req, res) => {
       }
     }
 
+    // ----- Real CPL: Meta spend / Meta-paid Souled regs only -----
+    // Canonical filter per ~/knowledge/wiki/connections/paid-acquisition-filter.md —
+    // Referral_Type__c = 'Paid' (manually maintained) + utm_source narrowed to Meta
+    // (Facebook + Instagram), excluding Google/TikTok paid. Matches the filter used
+    // by the Souled CPL Dashboard (Olami-Souled/souled-cpl-dashboard) so both reports
+    // agree on the CPL number.
     if (wantsCPL) {
+      const paidRegs = await queryAll(conn,
+        `SELECT Id, Student__c, CreatedDate FROM Registration__c
+         WHERE Program__c = '${SOULED_PROGRAM_ID}'
+         AND Referral_Type__c = 'Paid'
+         AND (utm_source__c IN ('facebook','ig','fb','Meta')
+              OR utm_source__c LIKE '%fbclid%'
+              OR utm_source__c = null)
+         AND CreatedDate >= ${startDate}T00:00:00Z
+         AND CreatedDate <= ${endDate}T23:59:59Z`
+      );
+      const paidRegsByDay = new Map();
+      for (const r of paidRegs) {
+        if (testIds.has(r.Student__c)) continue;
+        const day = new Date(r.CreatedDate).toISOString().slice(0, 10);
+        paidRegsByDay.set(day, (paidRegsByDay.get(day) || 0) + 1);
+      }
       const spendByDay = getMetaSpendByDay();
-      out.series.cpl = aggregateBucketsRatio(spendByDay, regsByDay, startDate, endDate, granularity);
+      out.series.cpl = aggregateBucketsRatio(spendByDay, paidRegsByDay, startDate, endDate, granularity);
     }
 
     if (wantsRegs) {

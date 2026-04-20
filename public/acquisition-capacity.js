@@ -190,12 +190,17 @@ async function loadStudentsChart() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Init date pickers (defaults: Sept 1 2025 → today, max = today)
+  // Init date pickers (default end = YESTERDAY, since today's data is partial
+   // and drops the last point/bucket on the chart). User can extend to today
+   // manually if they want to see today's in-progress numbers.
   const startInput = document.getElementById('studentsStart');
   const endInput = document.getElementById('studentsEnd');
   startInput.value = '2025-09-01';
-  endInput.value = new Date().toISOString().slice(0, 10);
-  endInput.max = endInput.value;
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  endInput.value = yesterday.toISOString().slice(0, 10);
+  endInput.max = today.toISOString().slice(0, 10); // allow opting back in to today
 
   // Date pickers
   startInput.addEventListener('change', loadStudentsChart);

@@ -17,11 +17,28 @@ let sfConn = null;
 
 async function getSfConnection() {
   if (sfConn && sfConn.accessToken) return sfConn;
-  const conn = new jsforce.Connection({ loginUrl: process.env.SF_LOGIN_URL || 'https://login.salesforce.com' });
-  await conn.login(process.env.SF_USERNAME, process.env.SF_PASSWORD + process.env.SF_SECURITY_TOKEN);
-  sfConn = conn;
-  console.log('Connected to Salesforce');
-  return conn;
+  const loginUrl = process.env.SF_LOGIN_URL || 'https://login.salesforce.com';
+  const tokenResp = await fetch(`${loginUrl}/services/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: process.env.SF_CLIENT_ID,
+      client_secret: process.env.SF_CLIENT_SECRET,
+      refresh_token: process.env.SF_REFRESH_TOKEN,
+    }),
+  });
+  if (!tokenResp.ok) {
+    const body = await tokenResp.text();
+    throw new Error(`SF refresh-token exchange failed: ${tokenResp.status} ${body}`);
+  }
+  const tok = await tokenResp.json();
+  sfConn = new jsforce.Connection({
+    instanceUrl: tok.instance_url,
+    accessToken: tok.access_token,
+  });
+  console.log('Connected to Salesforce via refresh-token OAuth');
+  return sfConn;
 }
 
 // --- Helpers ---

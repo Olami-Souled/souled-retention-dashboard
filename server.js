@@ -17,6 +17,11 @@ let sfConn = null;
 
 async function getSfConnection() {
   if (sfConn && sfConn.accessToken) return sfConn;
+  const missing = ['SF_CLIENT_ID', 'SF_CLIENT_SECRET', 'SF_REFRESH_TOKEN']
+    .filter(k => !process.env[k]);
+  if (missing.length) {
+    throw new Error(`Salesforce auth not configured — missing env vars: ${missing.join(', ')}. Set these on the deploy environment (Railway) per the OAuth refresh-token migration in PR #1.`);
+  }
   const loginUrl = process.env.SF_LOGIN_URL || 'https://login.salesforce.com';
   const tokenResp = await fetch(`${loginUrl}/services/oauth2/token`, {
     method: 'POST',
@@ -1014,16 +1019,38 @@ app.get('/api/executive-data', async (req, res) => {
     const tpField = getTouchPointField(fy);
     const intField = getInteractionField(fy);
 
+    // Each section is wrapped so one broken query doesn't 500 the whole report.
+    // computeL2Trips, computeSeminary, computeSpiritualGrowth, computeGraduation,
+    // computeClassesAndEvents, computeAllTime already have internal try/catch and
+    // return null/zero shapes on failure — wrapping the rest matches that contract.
+    const safe = async (label, fn, fallback) => {
+      try { return await fn(); }
+      catch (e) {
+        console.error(`${label} error:`, e.message);
+        return fallback;
+      }
+    };
+
+    const emptyCoaching = {
+      studentsMetCoach: null, totalOneOnOnes: null, avgWeeklyOneOnOnes: null,
+      tpBuckets: { '1-3': null, '4-6': null, '7-9': null, '10+': null }, tpContinuous: null,
+      intStudents: null,
+      intBuckets: { '1-3': null, '4-6': null, '7-9': null, '10+': null }, intContinuous: null
+    };
+
     // --- Section 1-3: Coaching & Buckets ---
-    let coachingMetrics;
-    if (tpField) {
-      coachingMetrics = await computeCoachingFromRollup(conn, testIds, tpField, intField, fy, fyDates);
-    } else {
-      coachingMetrics = await computeCoachingFromTouchPoints(conn, testIds, intField, fyDates);
-    }
+    const coachingMetrics = await safe('Coaching', () =>
+      tpField
+        ? computeCoachingFromRollup(conn, testIds, tpField, intField, fy, fyDates)
+        : computeCoachingFromTouchPoints(conn, testIds, intField, fyDates),
+      { ...emptyCoaching }
+    );
 
     // --- Section 3: Interaction Buckets (separate query) ---
-    const interactions = await computeInteractions(conn, testIds, intField, fy, fyDates);
+    const interactions = await safe('Interactions', () =>
+      computeInteractions(conn, testIds, intField, fy, fyDates),
+      { intStudents: null, intBuckets: emptyCoaching.intBuckets, intContinuous: null }
+    );
 
     // --- Section 4: L2 Trips ---
     const l2Trips = await computeL2Trips(conn, testIds, fyDates);

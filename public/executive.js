@@ -2,7 +2,13 @@
 
 async function fetchExecutiveData(fy) {
   const res = await fetch(`/api/executive-data?fy=${fy}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  if (!res.ok) {
+    let body = null;
+    try { body = await res.json(); } catch {}
+    const detail = body && body.error ? body.error : `API error: ${res.status}`;
+    console.error(`/api/executive-data?fy=${fy} failed:`, res.status, body);
+    throw new Error(detail);
+  }
   return res.json();
 }
 

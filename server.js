@@ -13,49 +13,60 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/executive.html', (req, res) => res.redirect('/'));
 
 // --- Salesforce connection ---
+// Auths as the regular admin user (not the integration user) so that all
+// objects/relationships the dashboard needs are visible — most notably
+// Class_Attendance__c, Experience__c, and the Program__r relationship on
+// Registration__c, all of which the Salesforce Integration license blocks
+// and which can NOT be granted via permset.
 let sfConn = null;
 
 async function getSfConnection() {
   if (sfConn && sfConn.accessToken) return sfConn;
-  const missing = ['SF_CLIENT_ID', 'SF_CLIENT_SECRET', 'SF_REFRESH_TOKEN']
+  const missing = ['SF_USERNAME', 'SF_PASSWORD', 'SF_SECURITY_TOKEN']
     .filter(k => !process.env[k]);
   if (missing.length) {
-    throw new Error(`Salesforce auth not configured — missing env vars: ${missing.join(', ')}. Set these on the deploy environment (Railway) per the OAuth refresh-token migration in PR #1.`);
+    throw new Error(`Salesforce auth not configured — missing env vars: ${missing.join(', ')}. Set SF_USERNAME / SF_PASSWORD / SF_SECURITY_TOKEN on the deploy environment (Railway). The dashboard authenticates as the regular admin user; integration-license auth is blocked from accessing Class_Attendance__c / Experience__c / Program__r.`);
   }
-  const loginUrl = process.env.SF_LOGIN_URL || 'https://login.salesforce.com';
-  const tokenResp = await fetch(`${loginUrl}/services/oauth2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      client_id: process.env.SF_CLIENT_ID,
-      client_secret: process.env.SF_CLIENT_SECRET,
-      refresh_token: process.env.SF_REFRESH_TOKEN,
-    }),
-  });
-  if (!tokenResp.ok) {
-    const body = await tokenResp.text();
-    throw new Error(`SF refresh-token exchange failed: ${tokenResp.status} ${body}`);
-  }
-  const tok = await tokenResp.json();
-  sfConn = new jsforce.Connection({
-    instanceUrl: tok.instance_url,
-    accessToken: tok.access_token,
-  });
-  console.log('Connected to Salesforce via refresh-token OAuth');
-  return sfConn;
+  const conn = new jsforce.Connection({ loginUrl: process.env.SF_LOGIN_URL || 'https://login.salesforce.com' });
+  await conn.login(process.env.SF_USERNAME, process.env.SF_PASSWORD + process.env.SF_SECURITY_TOKEN);
+  sfConn = conn;
+  console.log(`Connected to Salesforce as ${process.env.SF_USERNAME}`);
+  return conn;
+}
+
+function isSessionExpiredError(err) {
+  if (!err) return false;
+  const code = err.errorCode || err.name || '';
+  return code === 'INVALID_SESSION_ID' || /session.*expired|invalid.*session/i.test(err.message || '');
 }
 
 // --- Helpers ---
 
+// queryAll runs a SOQL query and pages through queryMore. If the cached
+// session has expired (sfConn was set on a prior request and Salesforce has
+// since rotated the session), invalidate sfConn, re-auth, and retry once.
 async function queryAll(conn, soql) {
-  let result = await conn.query(soql);
-  let records = result.records;
-  while (!result.done) {
-    result = await conn.queryMore(result.nextRecordsUrl);
-    records = records.concat(result.records);
+  try {
+    let result = await conn.query(soql);
+    let records = result.records;
+    while (!result.done) {
+      result = await conn.queryMore(result.nextRecordsUrl);
+      records = records.concat(result.records);
+    }
+    return records;
+  } catch (err) {
+    if (!isSessionExpiredError(err)) throw err;
+    console.warn('SF session expired; re-authenticating and retrying once');
+    sfConn = null;
+    const fresh = await getSfConnection();
+    let result = await fresh.query(soql);
+    let records = result.records;
+    while (!result.done) {
+      result = await fresh.queryMore(result.nextRecordsUrl);
+      records = records.concat(result.records);
+    }
+    return records;
   }
-  return records;
 }
 
 // Cache of test contact IDs (loaded once per server lifetime)

@@ -1,7 +1,8 @@
 // Executive Report - Frontend Logic
+const API_BASE = (typeof window !== 'undefined' && window.DASHBOARD_API_BASE) || '';
 
 async function fetchExecutiveData(fy) {
-  const res = await fetch(`/api/executive-data?fy=${fy}`);
+  const res = await fetch(`${API_BASE}/api/executive-data?fy=${fy}`);
   if (!res.ok) {
     let body = null;
     try { body = await res.json(); } catch {}

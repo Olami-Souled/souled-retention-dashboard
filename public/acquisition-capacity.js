@@ -1,6 +1,7 @@
 // Acquisition & Capacity report — frontend logic
 // One main chart: Souled Students over time, with toggleable overlays for
 // Total Capacity, Current Capacity, Current Capacity buffered, New Registrations, Cost per Signup.
+const API_BASE = (typeof window !== 'undefined' && window.DASHBOARD_API_BASE) || '';
 
 let studentsChart = null;
 let studentsGranularity = 'weekly';
@@ -23,7 +24,7 @@ async function loadStudentsChart() {
   try {
     // Always fetch the matched-students series; conditionally fetch overlays
     const fetches = [
-      fetch(`/api/matched-students-history?start=${start}&end=${end}&granularity=${studentsGranularity}`).then(r => r.json())
+      fetch(`${API_BASE}/api/matched-students-history?start=${start}&end=${end}&granularity=${studentsGranularity}`).then(r => r.json())
     ];
     if (enabledOverlays.size > 0) {
       // 'currentCapacityBuffered' is computed client-side from currentCapacity − buffer.
@@ -35,7 +36,7 @@ async function loadStudentsChart() {
       }
       const include = [...apiInclude].join(',');
       fetches.push(
-        fetch(`/api/student-overlays?start=${start}&end=${end}&granularity=${studentsGranularity}&include=${include}`).then(r => r.json())
+        fetch(`${API_BASE}/api/student-overlays?start=${start}&end=${end}&granularity=${studentsGranularity}&include=${include}`).then(r => r.json())
       );
     }
     const [students, overlaysPayload] = await Promise.all(fetches);

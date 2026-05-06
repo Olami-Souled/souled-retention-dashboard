@@ -1,4 +1,5 @@
 // --- State ---
+const API_BASE = (typeof window !== 'undefined' && window.DASHBOARD_API_BASE) || '';
 let filtersData = null;
 let retentionChart = null;
 let breakdownChart = null;
@@ -32,7 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // --- Load filter options ---
 async function loadFilters() {
   try {
-    const res = await fetch('/api/filters');
+    const res = await fetch(`${API_BASE}/api/filters`);
     filtersData = await res.json();
 
     populateSelect('coachId', filtersData.coaches.map(c => ({ value: c.id, label: c.name })));
@@ -116,7 +117,7 @@ function buildQueryParams(suffix = '') {
 
 async function fetchCohortData(suffix = '') {
   const qs = buildQueryParams(suffix);
-  const res = await fetch('/api/cohort-data?' + qs);
+  const res = await fetch(`${API_BASE}/api/cohort-data?` + qs);
   return res.json();
 }
 
@@ -460,7 +461,7 @@ async function fetchAndRenderBreakdown() {
   btn.disabled = true;
 
   try {
-    const res = await fetch('/api/breakdown-data?' + params.toString());
+    const res = await fetch(`${API_BASE}/api/breakdown-data?` + params.toString());
     const data = await res.json();
     renderBreakdownChart(data.series);
   } catch (err) {

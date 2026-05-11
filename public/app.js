@@ -1,5 +1,7 @@
 // --- State ---
-const API_BASE = (typeof window !== 'undefined' && window.DASHBOARD_API_BASE) || '';
+const _host = typeof window !== 'undefined' ? window.location.hostname : '';
+const _onRailway = _host === 'souled-executive-dashboard.up.railway.app' || _host === 'localhost' || _host === '127.0.0.1';
+const API_BASE = (typeof window !== 'undefined' && window.DASHBOARD_API_BASE) || (_onRailway ? '' : 'https://souled-executive-dashboard.up.railway.app');
 let filtersData = null;
 let retentionChart = null;
 let breakdownChart = null;

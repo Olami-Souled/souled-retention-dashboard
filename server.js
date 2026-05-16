@@ -589,6 +589,11 @@ const CACHE_DIR = path.join(__dirname, 'cache');
 try { if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, { recursive: true }); }
 catch (e) { console.error('Could not create cache dir:', e.message); }
 
+// In-memory cache for the current (incomplete) FY — prevents repeated slow SF fetches
+const memCache = new Map();           // fy -> { data, fetchedAt }
+const inFlight = new Map();           // fy -> Promise<data>
+const MEM_CACHE_TTL = 20 * 60 * 1000; // 20 minutes
+
 function isFYComplete(fy) {
   const fyDates = getFYDates(fy);
   return new Date() > new Date(fyDates.end);
@@ -1020,13 +1025,69 @@ app.get('/api/student-overlays', async (req, res) => {
   }
 });
 
+// --- buildExecutiveData: fetch all sections from Salesforce ---
+async function buildExecutiveData(fy) {
+  const conn = await getSfConnection();
+  const testIds = await getTestContactIds(conn);
+  const fyDates = getFYDates(fy);
+
+  const tpField = getTouchPointField(fy);
+  const intField = getInteractionField(fy);
+
+  // Each section is wrapped so one broken query doesn't fail the whole report.
+  const emptyCoaching = {
+    studentsMetCoach: null, totalOneOnOnes: null, avgWeeklyOneOnOnes: null,
+    tpBuckets: { '1-3': null, '4-6': null, '7-9': null, '10+': null }, tpContinuous: null,
+    intStudents: null,
+    intBuckets: { '1-3': null, '4-6': null, '7-9': null, '10+': null }, intContinuous: null
+  };
+  const safe = async (label, fn, fallback) => {
+    try { return await fn(); }
+    catch (e) { console.error(`${label} error:`, e.message); return fallback; }
+  };
+
+  const coachingMetrics = await safe('Coaching', () =>
+    tpField
+      ? computeCoachingFromRollup(conn, testIds, tpField, intField, fy, fyDates)
+      : computeCoachingFromTouchPoints(conn, testIds, intField, fyDates),
+    { ...emptyCoaching }
+  );
+  const interactions = await safe('Interactions', () =>
+    computeInteractions(conn, testIds, intField, fy, fyDates),
+    { intStudents: null, intBuckets: emptyCoaching.intBuckets, intContinuous: null }
+  );
+  const l2Trips = await computeL2Trips(conn, testIds, fyDates);
+  const spiritualGrowth = await computeSpiritualGrowth(conn, testIds, fyDates);
+  const graduation = await computeGraduation(conn, testIds, fyDates);
+  const events = await computeClassesAndEvents(conn, testIds, fyDates);
+  const allTime = await computeAllTime(conn, testIds);
+  const seminary = await computeSeminary(conn, testIds, fyDates);
+
+  coachingMetrics.intStudents = interactions.intStudents;
+  coachingMetrics.intBuckets = interactions.intBuckets;
+  coachingMetrics.intContinuous = interactions.intContinuous;
+
+  return {
+    fy,
+    fyDates,
+    cachedAt: new Date().toISOString(),
+    coaching: coachingMetrics,
+    l2Trips,
+    seminary,
+    spiritualGrowth,
+    graduation,
+    events,
+    allTime
+  };
+}
+
 // --- /api/executive-data ---
 app.get('/api/executive-data', async (req, res) => {
   try {
     const fy = req.query.fy || 'FY26';
     const forceRefresh = req.query.refresh === 'true';
 
-    // For completed FYs, serve from cache if available
+    // Disk cache for completed FYs
     if (isFYComplete(fy) && !forceRefresh) {
       const cached = readCache(fy);
       if (cached) {
@@ -1035,90 +1096,42 @@ app.get('/api/executive-data', async (req, res) => {
       }
     }
 
-    // Fetch live from Salesforce
-    console.log(`Fetching ${fy} live from Salesforce...`);
-    const conn = await getSfConnection();
-    const testIds = await getTestContactIds(conn);
-    const fyDates = getFYDates(fy);
-
-    const tpField = getTouchPointField(fy);
-    const intField = getInteractionField(fy);
-
-    // Each section is wrapped so one broken query doesn't 500 the whole report.
-    // computeL2Trips, computeSeminary, computeSpiritualGrowth, computeGraduation,
-    // computeClassesAndEvents, computeAllTime already have internal try/catch and
-    // return null/zero shapes on failure — wrapping the rest matches that contract.
-    const safe = async (label, fn, fallback) => {
-      try { return await fn(); }
-      catch (e) {
-        console.error(`${label} error:`, e.message);
-        return fallback;
+    // Memory cache for current (incomplete) FYs
+    if (!forceRefresh) {
+      const mem = memCache.get(fy);
+      if (mem && (Date.now() - mem.fetchedAt) < MEM_CACHE_TTL) {
+        console.log(`Serving ${fy} from memory cache`);
+        return res.json(mem.data);
       }
-    };
-
-    const emptyCoaching = {
-      studentsMetCoach: null, totalOneOnOnes: null, avgWeeklyOneOnOnes: null,
-      tpBuckets: { '1-3': null, '4-6': null, '7-9': null, '10+': null }, tpContinuous: null,
-      intStudents: null,
-      intBuckets: { '1-3': null, '4-6': null, '7-9': null, '10+': null }, intContinuous: null
-    };
-
-    // --- Section 1-3: Coaching & Buckets ---
-    const coachingMetrics = await safe('Coaching', () =>
-      tpField
-        ? computeCoachingFromRollup(conn, testIds, tpField, intField, fy, fyDates)
-        : computeCoachingFromTouchPoints(conn, testIds, intField, fyDates),
-      { ...emptyCoaching }
-    );
-
-    // --- Section 3: Interaction Buckets (separate query) ---
-    const interactions = await safe('Interactions', () =>
-      computeInteractions(conn, testIds, intField, fy, fyDates),
-      { intStudents: null, intBuckets: emptyCoaching.intBuckets, intContinuous: null }
-    );
-
-    // --- Section 4: L2 Trips ---
-    const l2Trips = await computeL2Trips(conn, testIds, fyDates);
-
-    // --- Section 5-6: SO/STAM and Step Forward ---
-    const spiritualGrowth = await computeSpiritualGrowth(conn, testIds, fyDates);
-
-    // --- Section 7: Graduation ---
-    const graduation = await computeGraduation(conn, testIds, fyDates);
-
-    // --- Section 8: Classes & Events ---
-    const events = await computeClassesAndEvents(conn, testIds, fyDates);
-
-    // --- Section 9: All-time ---
-    const allTime = await computeAllTime(conn, testIds);
-
-    // --- Section 4b: Seminary ---
-    const seminary = await computeSeminary(conn, testIds, fyDates);
-
-    // Merge interactions into coaching result
-    coachingMetrics.intStudents = interactions.intStudents;
-    coachingMetrics.intBuckets = interactions.intBuckets;
-    coachingMetrics.intContinuous = interactions.intContinuous;
-
-    const result = {
-      fy,
-      fyDates,
-      cachedAt: new Date().toISOString(),
-      coaching: coachingMetrics,
-      l2Trips,
-      seminary,
-      spiritualGrowth,
-      graduation,
-      events,
-      allTime
-    };
-
-    // Cache completed FYs to disk
-    if (isFYComplete(fy)) {
-      writeCache(fy, result);
     }
 
-    res.json(result);
+    // Deduplicate in-flight fetches — join the existing promise instead of
+    // starting a new Salesforce query for every concurrent request.
+    if (!forceRefresh && inFlight.has(fy)) {
+      console.log(`${fy} fetch already in progress, waiting...`);
+      try {
+        const data = await inFlight.get(fy);
+        return res.json(data);
+      } catch (err) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
+
+    // Start a new fetch and register it so concurrent requests can join.
+    console.log(`Fetching ${fy} live from Salesforce...`);
+    const fetchPromise = buildExecutiveData(fy);
+    inFlight.set(fy, fetchPromise);
+    try {
+      const result = await fetchPromise;
+      if (isFYComplete(fy)) {
+        writeCache(fy, result);
+      } else {
+        memCache.set(fy, { data: result, fetchedAt: Date.now() });
+      }
+      return res.json(result);
+    } finally {
+      inFlight.delete(fy);
+    }
   } catch (err) {
     console.error('Error fetching executive data:', err);
     res.status(500).json({ error: err.message });
@@ -1649,6 +1662,30 @@ async function computeAllTime(conn, testIds) {
   }
 }
 
+// Warm up the current FY cache at server start so the first user request is fast.
+async function warmUpFY(fy) {
+  if (inFlight.has(fy)) return;
+  console.log(`Warming up ${fy} cache...`);
+  const fetchPromise = buildExecutiveData(fy);
+  inFlight.set(fy, fetchPromise);
+  try {
+    const data = await fetchPromise;
+    memCache.set(fy, { data, fetchedAt: Date.now() });
+    console.log(`${fy} cache ready`);
+  } catch (e) {
+    console.error(`Failed to warm up ${fy}:`, e.message);
+  } finally {
+    inFlight.delete(fy);
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`Retention dashboard running at http://localhost:${PORT}`);
+
+  // Pre-populate FY26 cache in the background; refresh every 20 minutes.
+  const CURRENT_FY = 'FY26';
+  warmUpFY(CURRENT_FY).catch(() => {});
+  setInterval(() => {
+    if (!inFlight.has(CURRENT_FY)) warmUpFY(CURRENT_FY).catch(() => {});
+  }, MEM_CACHE_TTL);
 });

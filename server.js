@@ -1679,6 +1679,8 @@ async function warmUpFY(fy) {
   }
 }
 
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
 app.listen(PORT, () => {
   console.log(`Retention dashboard running at http://localhost:${PORT}`);
 

@@ -28,11 +28,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/executive.html', (req, res) => res.redirect('/'));
 
 // --- Salesforce connection ---
-// Auths as the regular admin user (not the integration user) so that all
-// objects/relationships the dashboard needs are visible — most notably
-// Class_Attendance__c, Experience__c, and the Program__r relationship on
-// Registration__c, all of which the Salesforce Integration license blocks
-// and which can NOT be granted via permset.
 let sfConn = null;
 
 async function _jwtConnect() {

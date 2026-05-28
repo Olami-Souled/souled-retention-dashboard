@@ -3,6 +3,7 @@ const express = require('express');
 const jsforce = require('jsforce');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -34,17 +35,46 @@ app.get('/executive.html', (req, res) => res.redirect('/'));
 // and which can NOT be granted via permset.
 let sfConn = null;
 
+async function _jwtConnect() {
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({
+    iss: process.env.SF_CONSUMER_KEY,
+    sub: process.env.SF_USERNAME,
+    aud: 'https://login.salesforce.com',
+    exp: Math.floor(Date.now() / 1000) + 180,
+  })).toString('base64url');
+  const signingInput = `${header}.${payload}`;
+  const sign = crypto.createSign('RSA-SHA256');
+  sign.update(signingInput);
+  const sig = sign.sign(process.env.SF_PRIVATE_KEY, 'base64url');
+  const assertion = `${signingInput}.${sig}`;
+  const resp = await fetch('https://login.salesforce.com/services/oauth2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
+  });
+  if (!resp.ok) throw new Error(`SF JWT auth failed: ${await resp.text()}`);
+  const { access_token, instance_url } = await resp.json();
+  return new jsforce.Connection({ accessToken: access_token, instanceUrl: instance_url });
+}
+
 async function getSfConnection() {
   if (sfConn && sfConn.accessToken) return sfConn;
+  if (process.env.SF_CONSUMER_KEY && process.env.SF_PRIVATE_KEY && process.env.SF_USERNAME) {
+    sfConn = await _jwtConnect();
+    console.log(`Connected to Salesforce via JWT Bearer as ${process.env.SF_USERNAME}`);
+    return sfConn;
+  }
+  // Local dev fallback: username + password + security token
   const missing = ['SF_USERNAME', 'SF_PASSWORD', 'SF_SECURITY_TOKEN']
     .filter(k => !process.env[k]);
   if (missing.length) {
-    throw new Error(`Salesforce auth not configured — missing env vars: ${missing.join(', ')}. Set SF_USERNAME / SF_PASSWORD / SF_SECURITY_TOKEN on the deploy environment (Railway). The dashboard authenticates as the regular admin user; integration-license auth is blocked from accessing Class_Attendance__c / Experience__c / Program__r.`);
+    throw new Error(`Salesforce auth not configured — missing env vars: ${missing.join(', ')}. Set SF_CONSUMER_KEY + SF_PRIVATE_KEY + SF_USERNAME for JWT Bearer (Railway), or SF_USERNAME + SF_PASSWORD + SF_SECURITY_TOKEN for local dev.`);
   }
   const conn = new jsforce.Connection({ loginUrl: process.env.SF_LOGIN_URL || 'https://login.salesforce.com' });
   await conn.login(process.env.SF_USERNAME, process.env.SF_PASSWORD + process.env.SF_SECURITY_TOKEN);
   sfConn = conn;
-  console.log(`Connected to Salesforce as ${process.env.SF_USERNAME}`);
+  console.log(`Connected to Salesforce via password as ${process.env.SF_USERNAME}`);
   return conn;
 }
 

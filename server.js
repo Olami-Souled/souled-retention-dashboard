@@ -1420,11 +1420,16 @@ async function computeSeminary(conn, testIds, fyDates) {
 
 async function computeSpiritualGrowth(conn, testIds, fyDates) {
   // Use Date_Became_* fields with FY date boundaries (Sep 1 - Aug 31)
-  // This works for all FYs including current year (unlike FY picklist fields
-  // which may not be populated for the current FY)
+  // This works for all FYs including current year (unlike FY picklist fields,
+  // which are legacy remnants from before dates were tracked).
+  // SO/STAM canon (Yair, 2026-06-11): "became X in window" requires BOTH the
+  // date in window AND the status picklist saying 'Became' — a dated
+  // 'Already was' student is SO but did not become SO through Souled, and
+  // must not be counted as a transition.
   try {
     const records = await queryAll(conn,
       `SELECT Id, Date_Became_SO__c, Date_Became_STAM__c,
+              Shabbos_Observant__c, STAM__c,
               Date_Became_Shomer_Kashrus__c, Date_Became_Shome_Tznius__c,
               Date_Became_Committed_to_Marry_Jewish__c
        FROM Contact
@@ -1448,10 +1453,11 @@ async function computeSpiritualGrowth(conn, testIds, fyDates) {
     let so = 0, stam = 0, kashrus = 0, tznius = 0, marryJewish = 0;
     const soOrStamIds = new Set();
 
+    const BECAME = ['Became', 'Became after program'];
     for (const r of records) {
       if (testIds.has(r.Id)) continue;
-      if (inFY(r.Date_Became_SO__c)) { so++; soOrStamIds.add(r.Id); }
-      if (inFY(r.Date_Became_STAM__c)) { stam++; soOrStamIds.add(r.Id); }
+      if (inFY(r.Date_Became_SO__c) && BECAME.includes(r.Shabbos_Observant__c)) { so++; soOrStamIds.add(r.Id); }
+      if (inFY(r.Date_Became_STAM__c) && BECAME.includes(r.STAM__c)) { stam++; soOrStamIds.add(r.Id); }
       if (inFY(r.Date_Became_Shomer_Kashrus__c)) kashrus++;
       if (inFY(r.Date_Became_Shome_Tznius__c)) tznius++;
       if (inFY(r.Date_Became_Committed_to_Marry_Jewish__c)) marryJewish++;

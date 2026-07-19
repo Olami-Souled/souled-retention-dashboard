@@ -1,29 +1,23 @@
 # Refreshing the Meta spend cache
 
-The dashboard reads daily Souled Meta spend from `data/meta_spend.json`. There's no live Meta API hook on the server (Railway doesn't have access to the Windsor.ai MCP, and we don't have a Windsor REST API key wired up). Refresh manually when needed:
+The dashboard reads daily Souled Meta spend from `data/meta_spend.json`
+(`spend_by_day`: `{ "YYYY-MM-DD": number }`). Data comes from the **direct Meta
+Marketing API** (Windsor.ai was retired in July 2026 — it overstated spend by
+~15%, so these numbers are now the accurate Ads Manager figures).
 
-## Option A — via Claude (easiest)
+## Automatic (default)
 
-Ask Claude in this project:
+The GitHub Actions workflow `.github/workflows/refresh-meta-spend.yml` runs daily
+(04:20 UTC) and on-demand (`workflow_dispatch`). It runs
+`node scripts/refresh-meta-spend.js`, which pulls daily account-level spend and
+commits `data/meta_spend.json` when it changes. Requires the repo secret
+`FACEBOOK_ADS_TOKEN` (permanent System User token, `ads_read`).
 
-> Refresh the Meta spend cache up to today.
+## Manual
 
-Claude will:
-1. Use the Windsor.ai MCP (`mcp__a739fb41…__get_data`) with `connector="facebook"`, `accounts=["548376353109705"]`, `fields=["date","spend"]`, and a date range covering whatever's missing or stale.
-2. Merge into `data/meta_spend.json` (preserving the existing structure and adding new days).
-3. Commit and push so Railway picks up the new data.
+```bash
+FACEBOOK_ADS_TOKEN=... node scripts/refresh-meta-spend.js            # since existing earliest
+FACEBOOK_ADS_TOKEN=... node scripts/refresh-meta-spend.js --since 2024-09-01
+```
 
-## Option B — manually via Windsor.ai web UI
-
-1. Log in to Windsor.ai.
-2. Open the Souled Facebook account (548376353109705).
-3. Export `date, spend` for the date range you want.
-4. Convert into the JSON shape used in `data/meta_spend.json` (`spend_by_day`: `{ "YYYY-MM-DD": number }`).
-5. Update the `latest` and `fetched_at` fields, commit, and push.
-
-## Option C — wire up Windsor REST API (long-term fix)
-
-If we ever want the server to refresh on its own:
-1. Create a Windsor.ai API key for the account.
-2. Add `WINDSOR_API_KEY` to `.env` locally and to Railway env vars.
-3. Replace this static cache with a server-side fetch (with 1-hour TTL) calling Windsor's REST API: `POST https://windsor.ai/api/v1/...`.
+Then commit and push `data/meta_spend.json` so the deployed dashboard picks it up.

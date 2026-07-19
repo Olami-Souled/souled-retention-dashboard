@@ -24,8 +24,19 @@ const DEFAULT_SINCE = '2024-09-01';
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 async function fetchJson(url) {
+  let last = 'exhausted retries';
   for (let attempt = 1; attempt <= 5; attempt++) {
-    const resp = await fetch(url);
+    let resp;
+    try {
+      resp = await fetch(url);
+    } catch (e) {
+      // Network-level failure (DNS, connection reset) — treat as transient.
+      last = e.message;
+      const backoff = 10000 * 2 ** (attempt - 1);
+      console.warn(`  attempt ${attempt} network error (${e.message}); retry in ${backoff / 1000}s`);
+      await new Promise((r) => setTimeout(r, backoff));
+      continue;
+    }
     if (resp.ok) return resp.json();
     const body = await resp.json().catch(() => ({}));
     const err = body.error || {};
@@ -34,11 +45,12 @@ async function fetchJson(url) {
       || [1504022, 1504044].includes(err.error_subcode)
       || err.is_transient;
     if (!transient) throw new Error(`Meta API ${resp.status}: ${JSON.stringify(err)}`);
+    last = `HTTP ${resp.status}`;
     const backoff = 10000 * 2 ** (attempt - 1);
     console.warn(`  attempt ${attempt} transient (${resp.status}); retry in ${backoff / 1000}s`);
     await new Promise((r) => setTimeout(r, backoff));
   }
-  throw new Error('Meta API: exhausted retries');
+  throw new Error(`Meta API: ${last}`);
 }
 
 async function fetchDailySpend(since, until) {
@@ -79,11 +91,17 @@ async function main() {
   const merged = { ...prior, ...fresh };
   const days = Object.keys(merged).sort();
 
+  // Only stamp a new fetched_at when spend actually changed, otherwise the file
+  // is byte-identical run-to-run and the workflow skips a no-op daily commit.
+  const norm = (o) => JSON.stringify(Object.keys(o).sort().map((k) => [k, o[k]]));
+  const changed = norm(merged) !== norm(prior);
+  const stamp = changed ? todayISO() : (existing.fetched_at || todayISO());
+
   const out = {
     _note: 'Daily Meta spend on Souled Facebook account 548376353109705. Refresh via scripts/refresh-meta-spend.js (direct Meta Marketing API; requires FACEBOOK_ADS_TOKEN).',
     _source: 'Meta Marketing API (direct)',
     account_id: '548376353109705',
-    fetched_at: todayISO(),
+    fetched_at: stamp,
     earliest: days[0],
     latest: days[days.length - 1],
     spend_by_day: Object.fromEntries(days.map((d) => [d, merged[d]])),

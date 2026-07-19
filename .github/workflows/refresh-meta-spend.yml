@@ -3,6 +3,9 @@ on:
   schedule:
     - cron: "20 4 * * *"   # daily 04:20 UTC (~07:20 Israel), after CPL refresh
   workflow_dispatch:
+concurrency:
+  group: refresh-meta-spend
+  cancel-in-progress: false
 jobs:
   refresh:
     runs-on: ubuntu-latest

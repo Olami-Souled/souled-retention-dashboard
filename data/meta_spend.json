@@ -2,9 +2,9 @@
  "_note": "Daily Meta spend on Souled Facebook account 548376353109705. Refresh via scripts/refresh-meta-spend.js (direct Meta Marketing API; requires FACEBOOK_ADS_TOKEN).",
  "_source": "Meta Marketing API (direct)",
  "account_id": "548376353109705",
- "fetched_at": "2026-09-28",
+ "fetched_at": "2026-09-29",
  "earliest": "2024-09-01",
- "latest": "2026-09-28",
+ "latest": "2026-09-29",
  "spend_by_day": {
   "2024-09-01": 387.94,
   "2024-09-02": 412.9,
@@ -720,7 +720,8 @@
   "2026-09-24": 653.72,
   "2026-09-25": 569.61,
   "2026-09-26": 568.75,
-  "2026-09-27": 667.22,
-  "2026-09-28": 159.48
+  "2026-09-27": 668.14,
+  "2026-09-28": 704.71,
+  "2026-09-29": 44.42
  }
 }

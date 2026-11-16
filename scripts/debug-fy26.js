@@ -113,7 +113,7 @@ async function main() {
   });
 
   await timed('computeClassesAndEvents - live', async () => {
-    const r = await queryAll(conn, `SELECT Student__c FROM Class_Attendance__c WHERE Student__r.Is_Registered_for_Souled__c = 1 AND Student__r.Test_Old__c = false AND Student__r.RecordType.Name = 'Student' AND CreatedDate >= ${fyDates.start}T00:00:00Z AND CreatedDate <= ${fyDates.end}T23:59:59Z AND (Duration_in_Minutes__c >= 2 OR Watched_Recording__c >= 10) AND RecordType.Name = 'Live Class'`);
+    const r = await queryAll(conn, `SELECT Student__c FROM Class_Attendance__c WHERE Student__r.Is_Registered_for_Souled__c = 1 AND Student__r.Test_Old__c = false AND Student__r.RecordType.Name = 'Student' AND CreatedDate >= ${fyDates.start}T00:00:00Z AND CreatedDate <= ${fyDates.end}T23:59:59Z AND (Duration_in_Minutes__c >= 2 OR Watched_Recording__c >= 10) AND RecordType.DeveloperName IN ('Live_Class','In_Person','Zoom_Group')`);
     return `${r.length} attendances`;
   });
 

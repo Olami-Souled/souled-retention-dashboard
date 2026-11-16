@@ -166,8 +166,8 @@ function buildCardsView(data, compareData, sideBySide) {
       <div class="kpi-grid">
         ${card('Video Classes Watched', ev.videoClassesWatched, pev?.videoClassesWatched, {small: true})}
         ${card('Video Class Watchers', ev.videoClassWatchers, pev?.videoClassWatchers, {small: true})}
-        ${card('Live Zoom Attendances', ev.liveZoomAttendances, pev?.liveZoomAttendances, {small: true})}
-        ${card('Live Zoom Attendees', ev.liveZoomAttendees, pev?.liveZoomAttendees, {small: true})}
+        ${card('Live Class Attendances', ev.liveZoomAttendances, pev?.liveZoomAttendances, {small: true})}
+        ${card('Live Class Attendees', ev.liveZoomAttendees, pev?.liveZoomAttendees, {small: true})}
         ${card('Coach-Led Courses', ev.coachLedCourses, pev?.coachLedCourses, {small: true})}
         ${card('CLC Students', ev.clcStudents, pev?.clcStudents, {small: true})}
         ${card('Experiences by Coaches', ev.experiencesByCoaches, pev?.experiencesByCoaches, {small: true})}
@@ -294,8 +294,8 @@ function buildSideBySideCards(container, data, compareData) {
       <div class="kpi-grid-dual">
         ${dualCard('Video Classes Watched', ev.videoClassesWatched, pev.videoClassesWatched, {small: true})}
         ${dualCard('Video Class Watchers', ev.videoClassWatchers, pev.videoClassWatchers, {small: true})}
-        ${dualCard('Live Zoom Attendances', ev.liveZoomAttendances, pev.liveZoomAttendances, {small: true})}
-        ${dualCard('Live Zoom Attendees', ev.liveZoomAttendees, pev.liveZoomAttendees, {small: true})}
+        ${dualCard('Live Class Attendances', ev.liveZoomAttendances, pev.liveZoomAttendances, {small: true})}
+        ${dualCard('Live Class Attendees', ev.liveZoomAttendees, pev.liveZoomAttendees, {small: true})}
         ${dualCard('Coach-Led Courses', ev.coachLedCourses, pev.coachLedCourses, {small: true})}
         ${dualCard('CLC Students', ev.clcStudents, pev.clcStudents, {small: true})}
         ${dualCard('Experiences by Coaches', ev.experiencesByCoaches, pev.experiencesByCoaches, {small: true})}
@@ -407,8 +407,8 @@ function buildTableView(data, compareData) {
           ${section('Classes & Events')}
           ${row('Video Classes Watched', ev.videoClassesWatched, pev?.videoClassesWatched)}
           ${row('Video Class Watchers', ev.videoClassWatchers, pev?.videoClassWatchers)}
-          ${row('Live Zoom Attendances', ev.liveZoomAttendances, pev?.liveZoomAttendances)}
-          ${row('Live Zoom Attendees', ev.liveZoomAttendees, pev?.liveZoomAttendees)}
+          ${row('Live Class Attendances', ev.liveZoomAttendances, pev?.liveZoomAttendances)}
+          ${row('Live Class Attendees', ev.liveZoomAttendees, pev?.liveZoomAttendees)}
           ${row('Coach-Led Courses', ev.coachLedCourses, pev?.coachLedCourses)}
           ${row('CLC Students', ev.clcStudents, pev?.clcStudents)}
           ${row('Experiences by Coaches', ev.experiencesByCoaches, pev?.experiencesByCoaches)}
@@ -535,8 +535,8 @@ async function downloadExcel() {
       ['CLASSES & EVENTS'],
       ['Video Classes Watched', fy26.events.videoClassesWatched, fy25.events.videoClassesWatched],
       ['Video Class Watchers', fy26.events.videoClassWatchers, fy25.events.videoClassWatchers],
-      ['Live Zoom Attendances', fy26.events.liveZoomAttendances, fy25.events.liveZoomAttendances],
-      ['Live Zoom Attendees', fy26.events.liveZoomAttendees, fy25.events.liveZoomAttendees],
+      ['Live Class Attendances', fy26.events.liveZoomAttendances, fy25.events.liveZoomAttendances],
+      ['Live Class Attendees', fy26.events.liveZoomAttendees, fy25.events.liveZoomAttendees],
       ['Coach-Led Courses', fy26.events.coachLedCourses, fy25.events.coachLedCourses],
       ['CLC Students', fy26.events.clcStudents, fy25.events.clcStudents],
       ['Experiences by Coaches', fy26.events.experiencesByCoaches, fy25.events.experiencesByCoaches],

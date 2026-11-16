@@ -1554,7 +1554,9 @@ async function computeClassesAndEvents(conn, testIds, fyDates) {
     console.error('Video class attendance query error:', e.message);
   }
 
-  // Live Zoom classes from Class_Attendance__c (RecordType = Live Class)
+  // Live classes from Class_Attendance__c: Live Class (Zoom), In Person and Zoom Group.
+  // In Person and Zoom Group are newer attendance types that also count as live classes.
+  // The result keys keep their old liveZoom* names so cached/compared payloads still line up.
   try {
     const liveAttendances = await queryAll(conn,
       `SELECT Student__c
@@ -1565,7 +1567,7 @@ async function computeClassesAndEvents(conn, testIds, fyDates) {
        AND CreatedDate >= ${fyDates.start}T00:00:00Z
        AND CreatedDate <= ${fyDates.end}T23:59:59Z
        AND (Duration_in_Minutes__c >= 2 OR Watched_Recording__c >= 10)
-       AND RecordType.Name = 'Live Class'`
+       AND RecordType.DeveloperName IN ('Live_Class','In_Person','Zoom_Group')`
     );
     const zoomStudents = new Set();
     let zoomAttendances = 0;
